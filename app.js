@@ -184,6 +184,7 @@ function render() {
   renderSidebar();
   if (state.activeMode === "channel") renderChannel();
   else renderDm();
+  scrollSlackSurfacesToBottom();
 }
 
 function renderSidebar() {
@@ -241,7 +242,7 @@ function renderChannel() {
     messageList.innerHTML = `
       ${channelIntro(channel, "URL을 composer에 붙여넣으면 서버가 공고 본문을 파싱해서 이 채널에 메시지로 추가합니다.")}
       <div class="day-divider"><span>Parsed postings</span></div>
-      ${jobs.length ? jobs.map(renderJobMessage).join("") : emptyBlock("아직 파싱된 URL이 없습니다.")}
+      ${jobs.length ? timelineItems(jobs).map(renderJobMessage).join("") : emptyBlock("아직 파싱된 URL이 없습니다.")}
     `;
     renderThread(jobs[0]);
     return;
@@ -257,7 +258,7 @@ function renderChannel() {
       </label>
     </div>
     <div class="day-divider"><span>${channel.query} results</span></div>
-    ${jobs.length ? jobs.map(renderJobMessage).join("") : emptyBlock("공고를 불러오는 중입니다.")}
+    ${jobs.length ? timelineItems(jobs).map(renderJobMessage).join("") : emptyBlock("공고를 불러오는 중입니다.")}
   `;
   renderThread(state.selectedJob || jobs[0]);
 }
@@ -279,6 +280,22 @@ function channelIntro(channel, text) {
 
 function emptyBlock(text) {
   return `<div class="empty-thread">${text}</div>`;
+}
+
+function timelineItems(items = []) {
+  return [...items].reverse();
+}
+
+function scrollToBottom(element) {
+  if (!element) return;
+  requestAnimationFrame(() => {
+    element.scrollTop = element.scrollHeight;
+  });
+}
+
+function scrollSlackSurfacesToBottom() {
+  scrollToBottom(messageList);
+  scrollToBottom(threadBody);
 }
 
 function renderJobMessage(job) {
@@ -360,7 +377,7 @@ function renderAiSearchDm() {
       </div>
     </section>
     <div id="aiSearchResults">
-      ${state.searchBotMessages.length ? state.searchBotMessages.map(renderAiSearchTurn).join("") : emptyBlock("원하는 공고를 자연어로 입력해보세요.")}
+      ${state.searchBotMessages.length ? timelineItems(state.searchBotMessages).map(renderAiSearchTurn).join("") : emptyBlock("원하는 공고를 자연어로 입력해보세요.")}
     </div>
   `;
   renderAiSearchThread();
@@ -427,6 +444,7 @@ async function renderThread(job) {
   if (!job) {
     threadChannel.textContent = "# empty";
     threadBody.innerHTML = emptyBlock("공고를 선택하면 로컬 매칭 결과가 표시됩니다.");
+    scrollToBottom(threadBody);
     return;
   }
   state.selectedJob = job;
@@ -444,9 +462,13 @@ async function renderThread(job) {
     `).join("")}
     <div id="matchResult">${emptyBlock("매칭 결과를 불러오는 중입니다.")}</div>
   `;
+  scrollToBottom(threadBody);
   const match = await api("/api/match", { method: "POST", body: JSON.stringify({ job }) }).catch((err) => ({ match: { score: 0, summary: err.message, strengths: [], risks: [], nextActions: [] } }));
   const result = document.querySelector("#matchResult");
-  if (result) result.innerHTML = renderMatch(match.match);
+  if (result) {
+    result.innerHTML = renderMatch(match.match);
+    scrollToBottom(threadBody);
+  }
 }
 
 function renderProfileThread() {
@@ -489,7 +511,7 @@ function renderAiSearchTurn(turn) {
         <div class="message-text">${escapeHtml(turn.response.answer)}</div>
         ${renderAiTrace(turn.response)}
         <div class="day-divider"><span>crawled jobs</span></div>
-        ${(turn.response.jobs || []).map(renderJobMessage).join("") || emptyBlock("검색 결과가 없습니다.")}
+        ${timelineItems(turn.response.jobs || []).map(renderJobMessage).join("") || emptyBlock("검색 결과가 없습니다.")}
       </div>
     </article>
   `;
@@ -588,10 +610,11 @@ async function submitComposer(text) {
     const container = document.querySelector("#searchDmResults");
     container.innerHTML = `
       <div class="day-divider"><span>${escapeHtml(query)} results</span></div>
-      ${(data.jobs || []).map(renderJobMessage).join("") || emptyBlock("검색 결과가 없습니다.")}
+      ${timelineItems(data.jobs || []).map(renderJobMessage).join("") || emptyBlock("검색 결과가 없습니다.")}
     `;
     state.jobs.search = data.jobs || [];
     renderSidebar();
+    scrollToBottom(messageList);
     return;
   }
 
