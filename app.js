@@ -425,9 +425,9 @@ function renderProfileDm() {
 
 function renderProfileUploadSurface() {
   const analysis = state.profileAnalysis || {};
-  const result = analysis.result;
   const extractedText = profileExtractedText(analysis);
-  const locked = analysis.locked || Number(analysis.attempts || 0) >= 1;
+  const convertedJsonText = profileConvertedJsonText(analysis);
+  const locked = Boolean(analysis.locked);
   const uploadDisabled = locked || state.profileUploading;
   const statusLabel = profileAnalysisStatusLabel(analysis);
   return `
@@ -437,8 +437,8 @@ function renderProfileUploadSurface() {
       <p>이력서와 포트폴리오는 PDF 파일만 받습니다. 분석이 끝나면 저장된 사용자 프로필 JSON을 그대로 표시합니다.</p>
       <div class="intro-meta">
         <span>${escapeHtml(statusLabel)}</span>
-        <span>${analysis.attempts || 0}/1 AI call</span>
-        <span>${locked ? "locked" : "ready"}</span>
+        <span>${convertedJsonText ? "JSON ready" : "JSON blank"}</span>
+        <span>${locked ? "locked" : "retry ready"}</span>
       </div>
     </section>
 
@@ -463,17 +463,17 @@ function renderProfileUploadSurface() {
             <input id="profilePdfInput" type="file" accept="application/pdf,.pdf" ${uploadDisabled ? "disabled" : ""} />
             <span class="pdf-icon">PDF</span>
             <strong>${escapeHtml(state.profileSelectedFileName || "PDF 파일 선택")}</strong>
-            <small>${locked ? "AI 분석은 이미 1회 사용되었습니다." : "application/pdf"}</small>
+            <small>${locked ? "AI 분석은 이미 완료되었습니다." : "application/pdf"}</small>
           </label>
           ${state.profileUploadError ? `<p class="profile-upload-error">${escapeHtml(state.profileUploadError)}</p>` : ""}
-          ${analysis.lastError && analysis.status === "failed" ? `<p class="profile-upload-error">${escapeHtml(analysis.lastError)}</p>` : ""}
+          ${analysis.lastError ? `<p class="profile-upload-error">${escapeHtml(analysis.lastError)}</p>` : ""}
           <button type="submit" ${uploadDisabled ? "disabled" : ""}>${state.profileUploading ? "분석 중" : "AI 분석 시작"}</button>
         </form>
       </div>
     </article>
 
     ${extractedText ? renderExtractedTextResult(analysis, extractedText) : ""}
-    ${result ? renderProfileAnalysisResult(result) : emptyBlock(locked ? "AI 분석 시도 기록이 있습니다." : "아직 업로드된 PDF가 없습니다.")}
+    ${extractedText ? renderProfileAnalysisResult(analysis) : emptyBlock("아직 업로드된 PDF가 없습니다.")}
   `;
 }
 
@@ -481,14 +481,23 @@ function profileExtractedText(analysis = {}) {
   return analysis.result?.extracted_text || analysis.extractedText || "";
 }
 
+function profileConvertedJsonText(analysis = {}) {
+  if (analysis.convertedJsonText) return analysis.convertedJsonText;
+  if (analysis.result && typeof analysis.result === "object") return JSON.stringify(analysis.result, null, 2);
+  return "";
+}
+
 function profileAnalysisStatusLabel(analysis = {}) {
   if (state.profileUploading || analysis.status === "running") return "분석 중";
   if (analysis.status === "completed") return "분석 완료";
+  if (analysis.status === "text_extracted") return "텍스트 추출 완료";
   if (analysis.status === "failed") return "분석 실패";
   return "분석 대기";
 }
 
-function renderProfileAnalysisResult(result) {
+function renderProfileAnalysisResult(analysis) {
+  const result = analysis.result && typeof analysis.result === "object" ? analysis.result : {};
+  const convertedJsonText = profileConvertedJsonText(analysis);
   const display = result.ai_analysis_result?.chat_display_message || {};
   return `
     <article class="message profile-result-message">
@@ -498,7 +507,7 @@ function renderProfileAnalysisResult(result) {
           <span class="message-name">${escapeHtml(display.title || "PDF 분석이 완료되었습니다.")}</span>
           <span class="message-time">${escapeHtml(result.generated_at || "")}</span>
         </div>
-        <div class="message-text">${escapeHtml(display.summary || result.ai_analysis_result?.overall_summary || "")}</div>
+        <div class="message-text">${escapeHtml(display.summary || result.ai_analysis_result?.overall_summary || (analysis.lastError ? "OpenAI 변환은 실패했습니다. JSON은 빈 문자열로 표시합니다." : ""))}</div>
         ${display.bullets?.length ? `<ul class="profile-result-bullets">${display.bullets.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
         <section class="json-output-card">
           <div class="json-card-head">
@@ -508,7 +517,7 @@ function renderProfileAnalysisResult(result) {
             </div>
             <span class="job-dday">${escapeHtml(result.model || "OpenAI")}</span>
           </div>
-          <pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>
+          <pre>${escapeHtml(convertedJsonText)}</pre>
         </section>
       </div>
     </article>
@@ -612,9 +621,10 @@ async function renderThread(job) {
 
 function renderProfileThread() {
   const analysis = state.profileAnalysis || {};
-  const result = analysis.result || {};
+  const result = analysis.result && typeof analysis.result === "object" ? analysis.result : {};
   const message = result.ai_analysis_result?.chat_display_message || {};
   const keywords = result.matching_profile?.core_keywords || [];
+  const extractedText = profileExtractedText(analysis);
   threadChannel.textContent = "# profile";
   threadBody.innerHTML = `
     <div class="thread-context"><span>상태</span><strong>${escapeHtml(profileAnalysisStatusLabel(analysis))}</strong></div>
@@ -625,8 +635,13 @@ function renderProfileThread() {
         <div class="thread-keywords">${keywords.slice(0, 8).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>
       </section>
       <div class="empty-thread">이 JSON은 공고 스레드의 로컬 매칭 키워드에도 반영됩니다.</div>
+    ` : extractedText ? `
+      <section class="profile-thread-summary">
+        <strong>텍스트 추출 완료</strong>
+        <p>OpenAI 변환 결과는 빈 문자열입니다. ${analysis.lastError ? escapeHtml(analysis.lastError) : ""}</p>
+      </section>
     ` : `
-      <div class="empty-thread">${analysis.status === "failed" ? escapeHtml(analysis.lastError || "분석 실패") : "PDF 분석 결과가 여기에 표시됩니다."}</div>
+      <div class="empty-thread">PDF 분석 결과가 여기에 표시됩니다.</div>
     `}
   `;
 }

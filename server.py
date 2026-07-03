@@ -48,6 +48,7 @@ DEFAULT_PROFILE_ANALYSIS = {
     "lastError": "",
     "sourceDocument": None,
     "extractedText": "",
+    "convertedJsonText": "",
     "result": None,
     "model": "",
     "attemptedAt": "",
@@ -462,6 +463,12 @@ def ensure_state():
             if key not in state["profileAnalysis"]:
                 state["profileAnalysis"][key] = value
                 changed = True
+        analysis = state["profileAnalysis"]
+        if analysis.get("status") == "failed" and analysis.get("extractedText") and not analysis.get("result"):
+            analysis["status"] = "text_extracted"
+            analysis["locked"] = False
+            analysis["convertedJsonText"] = ""
+            changed = True
     if changed:
         write_state(state)
 
@@ -929,13 +936,12 @@ def ensure_profile_analysis_payload(state):
 
 def analyze_profile_pdf_upload(headers, body, state):
     analysis = ensure_profile_analysis_payload(state)
-    if analysis.get("locked") or int(analysis.get("attempts") or 0) >= 1:
+    if analysis.get("locked"):
         return {
-            "ok": False,
-            "error": "AI profile analysis is locked after one attempt",
+            "ok": True,
             "analysis": analysis,
             "profile": state.get("profile", {}),
-        }, 429
+        }, 200
 
     fields, files = read_multipart_form(headers, body)
     upload = files.get("document")
@@ -976,13 +982,13 @@ def analyze_profile_pdf_upload(headers, body, state):
     }
 
     analysis.update({
-        "status": "running",
-        "attempts": int(analysis.get("attempts") or 0) + 1,
-        "locked": True,
+        "status": "text_extracted",
+        "locked": False,
         "lastError": "",
         "sourceDocument": source_document,
         "extractedText": extracted_text,
-        "result": None,
+        "convertedJsonText": "",
+        "result": "",
         "model": os.environ.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL),
         "attemptedAt": iso_now(),
         "completedAt": "",
@@ -990,19 +996,28 @@ def analyze_profile_pdf_upload(headers, body, state):
     write_state(state)
 
     try:
+        analysis["status"] = "running"
+        analysis["attempts"] = int(analysis.get("attempts") or 0) + 1
+        write_state(state)
         ai_result, model = call_openai_profile_analysis(extracted_text, document_type, source_document)
         result = wrap_profile_analysis_result(ai_result, source_document, extracted_text, model)
     except Exception as exc:
         state = read_state()
         analysis = ensure_profile_analysis_payload(state)
         analysis.update({
-            "status": "failed",
-            "locked": True,
+            "status": "text_extracted",
+            "locked": False,
             "lastError": str(exc),
+            "convertedJsonText": "",
+            "result": "",
             "completedAt": iso_now(),
         })
         write_state(state)
-        raise
+        return {
+            "ok": True,
+            "analysis": analysis,
+            "profile": state.get("profile", {}),
+        }, 200
 
     state = read_state()
     analysis = ensure_profile_analysis_payload(state)
@@ -1014,6 +1029,7 @@ def analyze_profile_pdf_upload(headers, body, state):
         "sourceDocument": source_document,
         "extractedText": extracted_text,
         "result": result,
+        "convertedJsonText": json.dumps(result, ensure_ascii=False, indent=2),
         "model": model,
         "completedAt": iso_now(),
     })
