@@ -3,7 +3,7 @@
 - 기준 폴더: `main_project/`
 - 서버: Python 표준 라이브러리 HTTP server
 - 프론트엔드: 정적 HTML/CSS/JS 단일 페이지 앱
-- 외부 공유: ngrok public URL
+- 외부 공유: Cloudflare quick tunnel 또는 ngrok public URL
 - AI/GPT/Codex: 현재 MVP에서는 사용하지 않음
 
 ## 1. 실행 스펙
@@ -21,13 +21,21 @@ cd main_project
 http://127.0.0.1:5174
 ```
 
-팀 공유:
+팀 공유, Cloudflare quick tunnel:
+
+```bash
+./scripts/start_cloudflared.sh
+```
+
+터미널에 표시되는 `trycloudflare.com` URL을 팀원에게 공유한다.
+
+팀 공유, ngrok:
 
 ```bash
 ./scripts/start_ngrok.sh
 ```
 
-ngrok이 출력하는 `Forwarding` URL을 팀원에게 공유한다.
+ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 
 ## 2. 주요 파일
 
@@ -38,6 +46,7 @@ ngrok이 출력하는 `Forwarding` URL을 팀원에게 공유한다.
 - `data/job_roles.json`: 로컬 직군 채널 카탈로그
 - `data/state.json`: 채널 표시 상태, 사용자 채널, 메모, 분류, 프로필 저장
 - `scripts/start_server.sh`: 로컬 서버 실행
+- `scripts/start_cloudflared.sh`: 로컬 서버 실행 후 Cloudflare quick tunnel 실행
 - `scripts/start_ngrok.sh`: 로컬 서버 실행 후 ngrok 터널 실행
 
 ## 3. 구현 기능
@@ -53,7 +62,7 @@ ngrok이 출력하는 `Forwarding` URL을 팀원에게 공유한다.
 9. 자연어 검색 DM
 10. 검색 봇 DM의 로컬 intent trace
 11. 프로필/공고 키워드 기반 로컬 매칭
-12. ngrok public URL 공유
+12. public tunnel URL 공유
 
 ## 4. 채널 스펙
 
@@ -124,4 +133,5 @@ ngrok이 출력하는 `Forwarding` URL을 팀원에게 공유한다.
 4. `/api/jobs?channel=pm`이 JobKorea 검색 결과 또는 fallback을 반환한다.
 5. 채널 관리 모달에서 직군 채널을 표시/숨김할 수 있다.
 6. 사용자 채널을 추가/삭제할 수 있다.
-7. ngrok 설치 환경에서 `./scripts/start_ngrok.sh`가 public URL을 출력한다.
+7. cloudflared 설치 환경에서 `./scripts/start_cloudflared.sh`가 public URL을 출력한다.
+8. ngrok 설치 환경에서 `./scripts/start_ngrok.sh`도 public URL을 출력한다.

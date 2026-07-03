@@ -5,7 +5,7 @@
 ## 1. 현재 운영 기준
 
 - 웹앱은 `main_project/server.py`로 로컬에서 실행한다.
-- 다른 팀에는 같은 Wi-Fi 주소가 아니라 ngrok public URL을 공유한다.
+- 다른 팀에는 같은 Wi-Fi 주소가 아니라 public tunnel URL을 공유한다.
 - GPT API Key, OpenAI API, 로컬 Codex CLI는 사용하지 않는다.
 - JobKorea 공고 검색/파싱은 서버의 크롤러가 수행한다.
 - 검색 의도와 매칭은 로컬 키워드 파서가 수행한다.
@@ -18,13 +18,21 @@
 ./scripts/start_server.sh
 ```
 
+Cloudflare quick tunnel 공유:
+
+```bash
+./scripts/start_cloudflared.sh
+```
+
+터미널에 표시되는 `trycloudflare.com` URL을 팀원에게 공유한다.
+
 ngrok 공유:
 
 ```bash
 ./scripts/start_ngrok.sh
 ```
 
-ngrok이 출력하는 `Forwarding` URL만 공유한다. 데모가 끝나면 터미널에서 프로세스를 종료해 터널을 닫는다.
+ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다. 데모가 끝나면 터미널에서 프로세스를 종료해 터널을 닫는다.
 
 ## 3. 저장 데이터
 
@@ -47,7 +55,7 @@ data/state.json
 
 ## 4. 공유 주의사항
 
-- ngrok URL을 받은 사람은 접속할 수 있다.
+- public tunnel URL을 받은 사람은 접속할 수 있다.
 - URL은 발표/테스트 대상자에게만 공유한다.
 - 데모 종료 후 ngrok 프로세스를 종료한다.
 - 운영 서비스로 확장할 경우 데모 토큰, 인증, 입력 URL 제한, 크롤링 요청 제한을 추가한다.
