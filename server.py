@@ -17,7 +17,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 STATE_PATH = os.path.join(DATA_DIR, "state.json")
 ROLE_CATALOG_PATH = os.path.join(DATA_DIR, "job_roles.json")
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-MAX_UPLOAD_BYTES = 12 * 1024 * 1024
+MAX_UPLOAD_BYTES = 40 * 1024 * 1024
 MAX_OPENAI_TEXT_CHARS = 80000
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
@@ -946,7 +946,7 @@ def analyze_profile_pdf_upload(headers, body, state):
     content_type = upload.get("content_type") or ""
     pdf_bytes = upload.get("content") or b""
     if len(pdf_bytes) > MAX_UPLOAD_BYTES:
-        raise ValueError("PDF file is too large")
+        raise ValueError(f"PDF file is too large. Maximum size is {MAX_UPLOAD_BYTES // 1024 // 1024}MB")
     if not filename.lower().endswith(".pdf"):
         raise ValueError("Only .pdf files are supported")
     if content_type and "pdf" not in content_type.lower() and content_type.lower() != "application/octet-stream":

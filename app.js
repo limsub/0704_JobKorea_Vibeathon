@@ -1,4 +1,5 @@
 const API = "";
+const MAX_PROFILE_PDF_BYTES = 40 * 1024 * 1024;
 
 let channels = [];
 
@@ -54,26 +55,39 @@ const channelFilter = document.querySelector("#channelFilter");
 const closeChannelManager = document.querySelector("#closeChannelManager");
 const customChannelForm = document.querySelector("#customChannelForm");
 
+async function parseApiResponse(res) {
+  const contentType = res.headers.get("Content-Type") || "";
+  const raw = await res.text();
+  let data = {};
+  if (raw && contentType.includes("application/json")) {
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      data = { error: raw };
+    }
+  } else if (raw) {
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      data = { error: raw };
+    }
+  }
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
 function api(path, options = {}) {
   return fetch(`${API}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...options,
-  }).then(async (res) => {
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "API failed");
-    return data;
-  });
+  }).then(parseApiResponse);
 }
 
 function uploadApi(path, body) {
   return fetch(`${API}${path}`, {
     method: "POST",
     body,
-  }).then(async (res) => {
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "API failed");
-    return data;
-  });
+  }).then(parseApiResponse);
 }
 
 function currentChannel() {
@@ -926,6 +940,9 @@ document.addEventListener("submit", async (event) => {
   const fileType = (file.type || "").toLowerCase();
   if (!file.name.toLowerCase().endsWith(".pdf") || (fileType && !["application/pdf", "application/octet-stream"].includes(fileType))) {
     return alert("PDF 파일만 업로드할 수 있습니다.");
+  }
+  if (file.size > MAX_PROFILE_PDF_BYTES) {
+    return alert(`PDF 파일은 최대 ${Math.round(MAX_PROFILE_PDF_BYTES / 1024 / 1024)}MB까지 업로드할 수 있습니다.`);
   }
 
   const form = new FormData();
