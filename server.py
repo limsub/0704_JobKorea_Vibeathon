@@ -5,6 +5,9 @@ import io
 import json
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -19,6 +22,8 @@ ROLE_CATALOG_PATH = os.path.join(DATA_DIR, "job_roles.json")
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 MAX_UPLOAD_BYTES = 40 * 1024 * 1024
 MAX_OPENAI_TEXT_CHARS = 10485760
+OCR_MAX_PAGES = 20
+OCR_DPI = 160
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 
@@ -717,6 +722,93 @@ def extract_text_with_pypdf(pdf_bytes):
     return normalize_extracted_text("\n\n".join(pages)), len(reader.pages)
 
 
+def is_useful_extracted_text(text):
+    text = normalize_extracted_text(text)
+    if len(text) < 20:
+        return False
+    sample = text[:5000]
+    total = max(len(sample), 1)
+    printable = sum(1 for ch in sample if ch.isprintable() or ch in "\n\r\t")
+    control = sum(1 for ch in sample if ord(ch) < 32 and ch not in "\n\r\t")
+    alpha_num = sum(1 for ch in sample if ch.isalnum())
+    pdf_markers = sum(sample.count(marker) for marker in [
+        "endstream",
+        "endobj",
+        "FlateDecode",
+        "/Type /Page",
+        "/XObject",
+        " obj",
+    ])
+    if pdf_markers >= 3:
+        return False
+    if control / total > 0.02:
+        return False
+    if printable / total < 0.9:
+        return False
+    return alpha_num / max(printable, 1) > 0.12
+
+
+def find_runtime_binary(name):
+    override = os.environ.get(f"{name.upper()}_BIN")
+    if override and os.path.exists(override):
+        return override
+    found = shutil.which(name)
+    if found:
+        return found
+    bundled = os.path.expanduser(f"~/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/{name}")
+    if os.path.exists(bundled):
+        return bundled
+    return ""
+
+
+def extract_text_with_ocr(pdf_bytes, page_count):
+    pdftoppm = find_runtime_binary("pdftoppm")
+    if not pdftoppm:
+        return "", "ocr_unavailable"
+    try:
+        from ocrmac.ocrmac import OCR
+    except Exception:
+        return "", "ocr_unavailable"
+
+    max_pages = min(max(page_count or 1, 1), int(os.environ.get("OCR_MAX_PAGES", OCR_MAX_PAGES)))
+    dpi = int(os.environ.get("OCR_DPI", OCR_DPI))
+    with tempfile.TemporaryDirectory(prefix="profile-pdf-ocr-") as tmpdir:
+        pdf_path = os.path.join(tmpdir, "input.pdf")
+        prefix = os.path.join(tmpdir, "page")
+        with open(pdf_path, "wb") as f:
+            f.write(pdf_bytes)
+        subprocess.run(
+            [pdftoppm, "-png", "-r", str(dpi), "-f", "1", "-l", str(max_pages), pdf_path, prefix],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        pages = []
+        for page_number in range(1, max_pages + 1):
+            image_path = f"{prefix}-{page_number}.png"
+            if not os.path.exists(image_path):
+                continue
+            try:
+                ocr = OCR(image_path, language_preference=["ko-KR", "en-US"])
+                rows = ocr.recognize()
+            except Exception:
+                continue
+            page_lines = []
+            for row in rows:
+                if not row:
+                    continue
+                text = clean_text(row[0])
+                if text:
+                    page_lines.append(text)
+            page_text = normalize_extracted_text("\n".join(page_lines))
+            if page_text:
+                pages.append(f"[Page {page_number}]\n{page_text}")
+        text = normalize_extracted_text("\n\n".join(pages))
+    if not is_useful_extracted_text(text):
+        return "", "ocr_no_text"
+    return text, "macos_vision_ocr"
+
+
 def decode_pdf_literal(value):
     output = []
     i = 0
@@ -782,9 +874,11 @@ def fallback_pdf_text(pdf_bytes):
 
 
 def extract_pdf_text(pdf_bytes):
+    page_count = estimate_pdf_page_count(pdf_bytes)
     try:
-        text, page_count = extract_text_with_pypdf(pdf_bytes)
-        if text:
+        text, pypdf_page_count = extract_text_with_pypdf(pdf_bytes)
+        page_count = pypdf_page_count or page_count
+        if is_useful_extracted_text(text):
             return {
                 "text": text,
                 "page_count": page_count,
@@ -792,11 +886,22 @@ def extract_pdf_text(pdf_bytes):
             }
     except Exception:
         pass
+
+    ocr_text, ocr_status = extract_text_with_ocr(pdf_bytes, page_count)
+    if ocr_text:
+        return {
+            "text": ocr_text,
+            "page_count": page_count,
+            "extractor": ocr_status,
+        }
+
     text = fallback_pdf_text(pdf_bytes)
+    if not is_useful_extracted_text(text):
+        text = ""
     return {
         "text": text,
-        "page_count": estimate_pdf_page_count(pdf_bytes),
-        "extractor": "fallback_pdf_strings",
+        "page_count": page_count,
+        "extractor": "fallback_pdf_strings" if text else ocr_status,
     }
 
 
