@@ -426,6 +426,7 @@ function renderProfileDm() {
 function renderProfileUploadSurface() {
   const analysis = state.profileAnalysis || {};
   const result = analysis.result;
+  const extractedText = profileExtractedText(analysis);
   const locked = analysis.locked || Number(analysis.attempts || 0) >= 1;
   const uploadDisabled = locked || state.profileUploading;
   const statusLabel = profileAnalysisStatusLabel(analysis);
@@ -471,8 +472,13 @@ function renderProfileUploadSurface() {
       </div>
     </article>
 
+    ${extractedText ? renderExtractedTextResult(analysis, extractedText) : ""}
     ${result ? renderProfileAnalysisResult(result) : emptyBlock(locked ? "AI 분석 시도 기록이 있습니다." : "아직 업로드된 PDF가 없습니다.")}
   `;
+}
+
+function profileExtractedText(analysis = {}) {
+  return analysis.result?.extracted_text || analysis.extractedText || "";
 }
 
 function profileAnalysisStatusLabel(analysis = {}) {
@@ -497,12 +503,37 @@ function renderProfileAnalysisResult(result) {
         <section class="json-output-card">
           <div class="json-card-head">
             <div>
-              <span class="job-source">candidate_profile JSON</span>
+              <span class="job-source">2. JSON 변환 결과</span>
               <h3>${escapeHtml(result.candidate_profile?.headline || "AI 분석 결과")}</h3>
             </div>
             <span class="job-dday">${escapeHtml(result.model || "OpenAI")}</span>
           </div>
           <pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>
+        </section>
+      </div>
+    </article>
+  `;
+}
+
+function renderExtractedTextResult(analysis, extractedText) {
+  const source = analysis.result?.source_documents?.[0] || analysis.sourceDocument || {};
+  return `
+    <article class="message profile-result-message">
+      <div class="message-avatar" style="background:#e01e5a">TXT</div>
+      <div class="message-content">
+        <div class="message-meta">
+          <span class="message-name">1. PDF 추출 텍스트</span>
+          <span class="message-time">${escapeHtml(source.original_file_name || "")}</span>
+        </div>
+        <section class="text-output-card">
+          <div class="json-card-head">
+            <div>
+              <span class="job-source">${escapeHtml(source.text_extractor || "PDF text")}</span>
+              <h3>${Number(source.extracted_text_char_count || extractedText.length).toLocaleString()} chars</h3>
+            </div>
+            <span class="job-dday">${source.page_count ? `${source.page_count}p` : "PDF"}</span>
+          </div>
+          <pre>${escapeHtml(extractedText)}</pre>
         </section>
       </div>
     </article>

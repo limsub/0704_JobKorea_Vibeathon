@@ -18,7 +18,7 @@ STATE_PATH = os.path.join(DATA_DIR, "state.json")
 ROLE_CATALOG_PATH = os.path.join(DATA_DIR, "job_roles.json")
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 MAX_UPLOAD_BYTES = 40 * 1024 * 1024
-MAX_OPENAI_TEXT_CHARS = 80000
+MAX_OPENAI_TEXT_CHARS = 10485760
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 
@@ -47,6 +47,7 @@ DEFAULT_PROFILE_ANALYSIS = {
     "locked": False,
     "lastError": "",
     "sourceDocument": None,
+    "extractedText": "",
     "result": None,
     "model": "",
     "attemptedAt": "",
@@ -906,7 +907,7 @@ def build_profile_text_from_analysis(result):
     }
 
 
-def wrap_profile_analysis_result(ai_result, source_document, model):
+def wrap_profile_analysis_result(ai_result, source_document, extracted_text, model):
     return {
         "schema_version": "resume_portfolio_profile.v1",
         "user_id": "local-user",
@@ -980,6 +981,7 @@ def analyze_profile_pdf_upload(headers, body, state):
         "locked": True,
         "lastError": "",
         "sourceDocument": source_document,
+        "extractedText": extracted_text,
         "result": None,
         "model": os.environ.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL),
         "attemptedAt": iso_now(),
@@ -989,7 +991,7 @@ def analyze_profile_pdf_upload(headers, body, state):
 
     try:
         ai_result, model = call_openai_profile_analysis(extracted_text, document_type, source_document)
-        result = wrap_profile_analysis_result(ai_result, source_document, model)
+        result = wrap_profile_analysis_result(ai_result, source_document, extracted_text, model)
     except Exception as exc:
         state = read_state()
         analysis = ensure_profile_analysis_payload(state)
@@ -1010,6 +1012,7 @@ def analyze_profile_pdf_upload(headers, body, state):
         "locked": True,
         "lastError": "",
         "sourceDocument": source_document,
+        "extractedText": extracted_text,
         "result": result,
         "model": model,
         "completedAt": iso_now(),

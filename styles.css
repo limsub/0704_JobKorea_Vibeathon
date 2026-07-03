@@ -853,6 +853,7 @@ button {
   padding-left: 18px;
 }
 
+.text-output-card,
 .json-output-card {
   max-width: 920px;
   margin-top: 10px;
@@ -862,6 +863,11 @@ button {
   background: #fff;
 }
 
+.text-output-card {
+  border-color: #f0c4d1;
+}
+
+.text-output-card pre,
 .json-output-card pre {
   max-height: 460px;
   margin: 0;
@@ -873,6 +879,11 @@ button {
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.text-output-card pre {
+  color: #1d1c1d;
+  background: #fff8fa;
 }
 
 .profile-thread-summary {
