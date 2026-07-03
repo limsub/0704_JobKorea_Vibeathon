@@ -271,7 +271,7 @@ function renderChannel() {
     messageList.innerHTML = `
       ${channelIntro(channel, "URL을 composer에 붙여넣으면 서버가 공고 본문을 파싱해서 이 채널에 메시지로 추가합니다.")}
       <div class="day-divider"><span>Parsed postings</span></div>
-      ${jobs.length ? timelineItems(jobs).map(renderJobMessage).join("") : emptyBlock("아직 파싱된 URL이 없습니다.")}
+      ${jobs.length ? bottomAnchoredItems(jobs).map(renderJobMessage).join("") : emptyBlock("아직 파싱된 URL이 없습니다.")}
     `;
     renderThread(jobs[0]);
     return;
@@ -287,7 +287,7 @@ function renderChannel() {
       </label>
     </div>
     <div class="day-divider"><span>${channel.query} results</span></div>
-    ${jobs.length ? timelineItems(jobs).map(renderJobMessage).join("") : emptyBlock("공고를 불러오는 중입니다.")}
+    ${jobs.length ? bottomAnchoredItems(jobs).map(renderJobMessage).join("") : emptyBlock("공고를 불러오는 중입니다.")}
   `;
   renderThread(state.selectedJob || jobs[0]);
 }
@@ -311,7 +311,8 @@ function emptyBlock(text) {
   return `<div class="empty-thread">${text}</div>`;
 }
 
-function timelineItems(items = []) {
+function bottomAnchoredItems(items = []) {
+  // Message surfaces always open at the bottom, so the source/API first item must render last.
   return [...items].reverse();
 }
 
@@ -406,7 +407,7 @@ function renderAiSearchDm() {
       </div>
     </section>
     <div id="aiSearchResults">
-      ${state.searchBotMessages.length ? timelineItems(state.searchBotMessages).map(renderAiSearchTurn).join("") : emptyBlock("원하는 공고를 자연어로 입력해보세요.")}
+      ${state.searchBotMessages.length ? bottomAnchoredItems(state.searchBotMessages).map(renderAiSearchTurn).join("") : emptyBlock("원하는 공고를 자연어로 입력해보세요.")}
     </div>
   `;
   renderAiSearchThread();
@@ -561,7 +562,7 @@ function renderSearchDm() {
       <p>검색 문장을 보내면 로컬 서버가 핵심 키워드를 뽑아 JobKorea에서 검색하고, 결과를 DM 답장처럼 보여줍니다.</p>
     </section>
     <div id="searchDmResults">
-      ${state.searchBotMessages.length ? timelineItems(state.searchBotMessages).map(renderSearchTurn).join("") : emptyBlock("원하는 공고를 자연어로 입력해보세요.")}
+      ${state.searchBotMessages.length ? bottomAnchoredItems(state.searchBotMessages).map(renderSearchTurn).join("") : emptyBlock("원하는 공고를 자연어로 입력해보세요.")}
     </div>
   `;
   renderSearchThread();
@@ -683,7 +684,7 @@ function renderSearchTurn(turn) {
         <div class="message-text">${escapeHtml(turn.response.answer)}</div>
         ${renderAiTrace(turn.response)}
         <div class="day-divider"><span>crawled jobs</span></div>
-        ${timelineItems(turn.response.jobs || []).map(renderJobMessage).join("") || emptyBlock("검색 결과가 없습니다.")}
+        ${bottomAnchoredItems(turn.response.jobs || []).map(renderJobMessage).join("") || emptyBlock("검색 결과가 없습니다.")}
       </div>
     </article>
   `;
