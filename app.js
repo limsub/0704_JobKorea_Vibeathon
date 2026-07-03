@@ -84,10 +84,66 @@ function escapeHtml(value = "") {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char]);
 }
 
+function jobRaw(job) {
+  return job.raw || {};
+}
+
+function jobProfile(job) {
+  return job.job_profile || {};
+}
+
+function jobSlackMessages(job) {
+  return job.slack_messages || { message_title: "", message_body: "" };
+}
+
+function jobCompany(job) {
+  return jobProfile(job).company_name || jobRaw(job).company_name || job.company || "-";
+}
+
+function jobTitle(job) {
+  return jobProfile(job).job_title || jobRaw(job).title || job.title || "Untitled posting";
+}
+
+function jobUrl(job) {
+  return job.source_url || job.url || "";
+}
+
+function jobSource(job) {
+  return job.source || "jobkorea";
+}
+
+function jobCareer(job) {
+  return jobRaw(job).career || job.career || "공고";
+}
+
+function jobLocation(job) {
+  return jobRaw(job).location || job.location || "-";
+}
+
+function jobPeriod(job) {
+  return jobRaw(job).period || job.period || "-";
+}
+
+function jobKeywords(job) {
+  const profile = jobProfile(job);
+  return [
+    ...(profile.responsibilities || []),
+    ...(profile.required_skills || []),
+    ...(profile.preferred_skills || []),
+    ...(job.keywords || []),
+  ].filter(Boolean);
+}
+
+function jobSearchText(job) {
+  return `${jobCompany(job)} ${jobTitle(job)} ${jobCareer(job)} ${jobLocation(job)} ${jobKeywords(job).join(" ")}`;
+}
+
 function toneText(job) {
-  if (state.tone === "raw") return `${job.company} · ${job.title}`;
-  if (state.tone === "friendly") return `${job.company}에서 ${job.title} 포지션을 찾았어요. 괜찮아 보이면 ⭐로 후보에 넣어두세요.`;
-  return `${job.company} 채용공고를 확인했습니다. 주요 조건과 나와의 매칭 결과를 스레드에서 검토하세요.`;
+  const slack = jobSlackMessages(job);
+  if (slack.message_title || slack.message_body) return [slack.message_title, slack.message_body].filter(Boolean).join(" ");
+  if (state.tone === "raw") return `${jobCompany(job)} · ${jobTitle(job)}`;
+  if (state.tone === "friendly") return `${jobCompany(job)}에서 ${jobTitle(job)} 포지션을 찾았어요. 현재 slack_messages는 ChatGPT API 미사용으로 비어 있습니다.`;
+  return `${jobCompany(job)} 채용공고 원문 JSON입니다. slack_messages는 ChatGPT API 연동 전까지 빈 값으로 유지됩니다.`;
 }
 
 async function boot() {
@@ -149,7 +205,7 @@ function renderSidebar() {
 
   const jobDms = Object.values(state.jobs).flat().slice(0, 12).map((job) => ({
     id: `job:${job.id}`,
-    name: job.company,
+    name: jobCompany(job),
     job,
   }));
   const fixed = [
@@ -192,7 +248,7 @@ function renderChannel() {
   }
 
   messageList.innerHTML = `
-    ${channelIntro(channel, "JobKorea 검색 결과를 메시지처럼 분류하고, 스레드에서 로컬 매칭/상세 정보를 봅니다.")}
+    ${channelIntro(channel, "개발 단계에서는 JobKorea 크롤링 결과를 JSON_1 형태 그대로 보여줍니다. slack_messages는 ChatGPT API 연동 전까지 빈 값입니다.")}
     <div class="job-toolbar">
       <button data-refresh="${channel.id}">JobKorea 새로고침</button>
       <label>톤
@@ -227,13 +283,14 @@ function emptyBlock(text) {
 
 function renderJobMessage(job) {
   const selected = state.classifications[job.id] || [];
+  const company = jobCompany(job);
   return `
     <article class="message job-message" data-job="${job.id}">
-      <button class="message-avatar" style="background:${colorFor(job.company)}" data-open-dm="${job.id}">${initials(job.company)}</button>
+      <button class="message-avatar" style="background:${colorFor(company)}" data-open-dm="${job.id}">${initials(company)}</button>
       <div class="message-content">
         <div class="message-meta">
-          <button class="message-name" data-open-dm="${job.id}">${job.company}</button>
-          <span class="message-time">${job.source || "JobKorea"}</span>
+          <button class="message-name" data-open-dm="${job.id}">${escapeHtml(company)}</button>
+          <span class="message-time">${escapeHtml(jobSource(job))}</span>
         </div>
         <div class="message-text">${escapeHtml(toneText(job))}</div>
         ${renderJobCard(job)}
@@ -252,7 +309,7 @@ function renderJobMessage(job) {
       <div class="message-actions">
         <button title="DM" data-open-dm="${job.id}">💬</button>
         <button title="Thread" data-thread-job="${job.id}">↪</button>
-        <button title="Open" data-open-url="${job.url}">↗</button>
+        <button title="Open" data-open-url="${jobUrl(job)}">↗</button>
       </div>
     </article>
   `;
@@ -260,26 +317,18 @@ function renderJobMessage(job) {
 
 function renderJobCard(job) {
   return `
-    <div class="job-card">
-      <div class="job-card-head">
+    <div class="job-json-card">
+      <div class="json-card-head">
         <div>
-          <span class="job-source">${job.source || "JobKorea"}</span>
-          <h3>${escapeHtml(job.title || "Untitled posting")}</h3>
+          <span class="job-source">${escapeHtml(jobSource(job))}</span>
+          <h3>${escapeHtml(jobTitle(job))}</h3>
         </div>
-        <span class="job-dday">${escapeHtml(job.career || "공고")}</span>
+        <span class="job-dday">${escapeHtml(jobCareer(job))}</span>
       </div>
-      <div class="job-meta-grid">
-        <span><strong>회사</strong>${escapeHtml(job.company || "-")}</span>
-        <span><strong>기간</strong>${escapeHtml(job.period || "-")}</span>
-        <span><strong>지역</strong>${escapeHtml(job.location || "-")}</span>
-        <span><strong>조회</strong>${job.readCount || "상세 참고"}</span>
-      </div>
-      <div class="job-roles">
-        ${(job.keywords || []).slice(0, 8).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
-      </div>
+      <pre>${escapeHtml(JSON.stringify(job, null, 2))}</pre>
       <div class="job-card-footer">
-        <span>${escapeHtml(job.url || "")}</span>
-        <a href="${job.url}" target="_blank" rel="noreferrer">원문 열기</a>
+        <span>${escapeHtml(jobUrl(job))}</span>
+        <a href="${jobUrl(job)}" target="_blank" rel="noreferrer">원문 열기</a>
       </div>
     </div>
   `;
@@ -354,7 +403,7 @@ function renderSearchDm() {
 
 function renderJobDm(job) {
   if (!job) return;
-  channelTitle.textContent = job.company;
+  channelTitle.textContent = jobCompany(job);
   channelSubtitle.textContent = "공고 담당자 DM처럼 쓰는 개인 기록 공간";
   memberCount.textContent = "DM";
   bookmarks.innerHTML = `<button class="bookmark">자소서 초안</button><button class="bookmark">면접 메모</button>`;
@@ -467,10 +516,13 @@ function renderAiTrace(response) {
 
 function defaultDetails(job) {
   return [
-    `회사: ${job.company}`,
-    `공고명: ${job.title}`,
-    `접수기간: ${job.period}`,
-    `키워드: ${(job.keywords || []).join(", ") || "상세 공고 참고"}`,
+    `회사: ${jobCompany(job)}`,
+    `공고명: ${jobTitle(job)}`,
+    `접수기간: ${jobPeriod(job)}`,
+    `근무지: ${jobLocation(job)}`,
+    `키워드: ${jobKeywords(job).join(", ") || "상세 공고 참고"}`,
+    `slack_messages.message_title: ${jobSlackMessages(job).message_title || "(empty)"}`,
+    `slack_messages.message_body: ${jobSlackMessages(job).message_body || "(empty)"}`,
   ];
 }
 
@@ -771,11 +823,11 @@ searchOverlay.addEventListener("click", (event) => {
 });
 searchInput.addEventListener("input", () => {
   const query = searchInput.value.toLowerCase();
-  const jobs = Object.values(state.jobs).flat().filter((job) => `${job.company} ${job.title} ${(job.keywords || []).join(" ")}`.toLowerCase().includes(query));
+  const jobs = Object.values(state.jobs).flat().filter((job) => jobSearchText(job).toLowerCase().includes(query));
   searchResults.innerHTML = jobs.map((job) => `
     <button class="search-result" data-thread-job="${job.id}">
-      <span class="search-avatar" style="background:${colorFor(job.company)}">${initials(job.company)}</span>
-      <span><strong>${job.company}</strong><p>${job.title}</p><small>${(job.keywords || []).slice(0, 4).join(", ")}</small></span>
+      <span class="search-avatar" style="background:${colorFor(jobCompany(job))}">${initials(jobCompany(job))}</span>
+      <span><strong>${escapeHtml(jobCompany(job))}</strong><p>${escapeHtml(jobTitle(job))}</p><small>${jobKeywords(job).slice(0, 4).map(escapeHtml).join(", ")}</small></span>
     </button>
   `).join("") || emptyBlock("결과가 없습니다.");
 });

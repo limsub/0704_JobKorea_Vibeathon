@@ -760,6 +760,16 @@ button {
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
 }
 
+.job-json-card {
+  max-width: min(920px, 100%);
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+}
+
 .job-card-head {
   display: flex;
   align-items: flex-start;
@@ -768,6 +778,36 @@ button {
   padding: 14px 14px 12px;
   border-left: 4px solid var(--blue);
   background: linear-gradient(90deg, #f4f8fb, #fff);
+}
+
+.json-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 14px 12px;
+  border-left: 4px solid var(--green);
+  background: #f7faf8;
+}
+
+.json-card-head h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.32;
+}
+
+.job-json-card pre {
+  max-height: 460px;
+  margin: 0;
+  overflow: auto;
+  padding: 14px;
+  border-top: 1px solid #ededed;
+  color: #242124;
+  background: #fbfbfb;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
 }
 
 .job-source {

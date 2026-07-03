@@ -63,6 +63,7 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 10. 검색 봇 DM의 로컬 intent trace
 11. 프로필/공고 키워드 기반 로컬 매칭
 12. public tunnel URL 공유
+13. 채널 공고 셀에서 `JSON_1 공고 정보` 원문 표시
 
 ## 4. 채널 스펙
 
@@ -98,6 +99,40 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 
 ## 6. 데이터 스펙
 
+공고 리스트 응답의 각 공고는 개발 단계에서 아래 구조를 그대로 화면에 표시한다.
+
+```json
+{
+  "id": "jobkorea_49435790",
+  "source": "jobkorea",
+  "source_url": "https://www.jobkorea.co.kr/Recruit/GI_Read/49435790",
+  "raw": {
+    "title": "원본 공고 제목",
+    "company_name": "원본 회사명",
+    "career": "신입",
+    "location": "서울",
+    "salary": "회사 내규에 따름",
+    "period": "2026.06.24 ~ 2026.07.13",
+    "raw_text": "크롤링한 원문 텍스트"
+  },
+  "job_profile": {
+    "company_name": "현대오토에버㈜",
+    "job_title": "2026년 3분기 신입사원 모집",
+    "responsibilities": [],
+    "required_skills": [],
+    "preferred_skills": [],
+    "cover_letter_questions": [],
+    "deadline": "2026-07-13T13:00:00+09:00"
+  },
+  "slack_messages": {
+    "message_title": "",
+    "message_body": ""
+  }
+}
+```
+
+`slack_messages`는 ChatGPT API 연동 전까지 빈 문자열로 유지한다.
+
 `data/state.json`:
 
 ```json
@@ -125,13 +160,23 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 - 로컬 Codex CLI 호출
 - 같은 Wi-Fi 또는 로컬 IP 기반 팀 접속 전제
 
-## 8. 검증 기준
+## 8. 추후 구현 필요 항목
+
+- ChatGPT API Key 설정
+- `PROMPT_1 공고 정보 -> 슬랙 메세지 변환` 작성
+- 서버에서 공고 JSON을 ChatGPT API에 전달
+- 응답을 `slack_messages.message_title`, `slack_messages.message_body`에 저장
+- 채널 화면을 JSON 원문 표시에서 Slack 메시지 표시로 전환
+
+## 9. 검증 기준
 
 1. `python3 -m py_compile server.py`가 통과한다.
 2. `app.js`, `dashboard.js`의 JS 문법 검사가 통과한다.
 3. `/api/channels`가 활성 채널과 직군 카탈로그를 반환한다.
 4. `/api/jobs?channel=pm`이 JobKorea 검색 결과 또는 fallback을 반환한다.
-5. 채널 관리 모달에서 직군 채널을 표시/숨김할 수 있다.
-6. 사용자 채널을 추가/삭제할 수 있다.
-7. cloudflared 설치 환경에서 `./scripts/start_cloudflared.sh`가 public URL을 출력한다.
-8. ngrok 설치 환경에서 `./scripts/start_ngrok.sh`도 public URL을 출력한다.
+5. `/api/jobs?channel=pm`의 각 공고에 빈 `slack_messages`가 포함된다.
+6. 채널 화면에서 공고 JSON이 그대로 표시된다.
+7. 채널 관리 모달에서 직군 채널을 표시/숨김할 수 있다.
+8. 사용자 채널을 추가/삭제할 수 있다.
+9. cloudflared 설치 환경에서 `./scripts/start_cloudflared.sh`가 public URL을 출력한다.
+10. ngrok 설치 환경에서 `./scripts/start_ngrok.sh`도 public URL을 출력한다.

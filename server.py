@@ -143,17 +143,26 @@ def channel_payload(state=None):
 
 def fallback_jobs_for(channel):
     query = channel.get("query") or channel.get("name") or "개발자"
-    return [{
-        "id": f"fallback-{channel.get('id', slugify_channel_id(query))}",
-        "title": f"{query} 채용공고",
-        "company": "JobKorea Search",
-        "url": f"https://www.jobkorea.co.kr/Search/?stext={urllib.parse.quote(query)}",
-        "period": "JobKorea 검색 결과",
-        "career": "공고 상세 참고",
-        "location": "공고 상세 참고",
-        "keywords": channel.get("bookmarks", [])[:5] or [query],
-        "source": "fallback",
-    }]
+    source_url = f"https://www.jobkorea.co.kr/Search/?stext={urllib.parse.quote(query)}"
+    return [build_job_payload(
+        source="fallback",
+        source_url=source_url,
+        raw={
+            "title": f"{query} 채용공고",
+            "company_name": "JobKorea Search",
+            "career": "공고 상세 참고",
+            "location": "공고 상세 참고",
+            "salary": "공고 상세 참고",
+            "period": "JobKorea 검색 결과",
+            "raw_text": "JobKorea 검색 결과를 불러오지 못해 생성한 fallback 데이터입니다.",
+        },
+        job_profile={
+            "company_name": "JobKorea Search",
+            "job_title": f"{query} 채용공고",
+            "required_skills": channel.get("bookmarks", [])[:5] or [query],
+        },
+        job_id=f"fallback-{channel.get('id', slugify_channel_id(query))}",
+    )]
 
 
 def create_custom_channel(payload, state):
@@ -279,27 +288,105 @@ def extract_job_content(text):
     return []
 
 
+def empty_slack_messages():
+    return {
+        "message_title": "",
+        "message_body": "",
+    }
+
+
+def build_job_payload(source, source_url, raw, job_profile=None, job_id=None):
+    raw = {
+        "title": clean_text(raw.get("title")),
+        "company_name": clean_text(raw.get("company_name")),
+        "career": clean_text(raw.get("career")),
+        "location": clean_text(raw.get("location")),
+        "salary": clean_text(raw.get("salary") or "공고 상세 참고"),
+        "period": clean_text(raw.get("period")),
+        "raw_text": clean_text(raw.get("raw_text"))[:8000],
+    }
+    profile = {
+        "company_name": raw["company_name"],
+        "job_title": raw["title"],
+        "responsibilities": [],
+        "required_skills": [],
+        "preferred_skills": [],
+        "cover_letter_questions": [],
+        "deadline": "",
+    }
+    profile.update(job_profile or {})
+    for key in ["responsibilities", "required_skills", "preferred_skills", "cover_letter_questions"]:
+        value = profile.get(key)
+        if isinstance(value, str):
+            profile[key] = [value] if value else []
+        elif not isinstance(value, list):
+            profile[key] = []
+    return {
+        "id": job_id or f"{source}_{abs(hash(source_url))}",
+        "source": source,
+        "source_url": source_url,
+        "raw": raw,
+        "job_profile": profile,
+        "slack_messages": empty_slack_messages(),
+    }
+
+
+def format_deadline(period_end):
+    period_end = clean_text(period_end)
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", period_end):
+        return ""
+    return f"{period_end}T23:59:59+09:00"
+
+
+def job_company(job):
+    return clean_text((job.get("job_profile") or {}).get("company_name") or (job.get("raw") or {}).get("company_name") or job.get("company"))
+
+
+def job_title(job):
+    return clean_text((job.get("job_profile") or {}).get("job_title") or (job.get("raw") or {}).get("title") or job.get("title"))
+
+
+def job_keywords(job):
+    profile = job.get("job_profile") or {}
+    values = []
+    for key in ["responsibilities", "required_skills", "preferred_skills"]:
+        values.extend(profile.get(key) or [])
+    return [clean_text(value) for value in values if clean_text(value)]
+
+
 def normalize_job(item, query):
-    job_id = str(item.get("id") or item.get("legacyJobNo") or f"{query}-{time.time()}")
-    url = f"https://www.jobkorea.co.kr/Recruit/GI_Read/{job_id}" if job_id else f"https://www.jobkorea.co.kr/Search/?stext={urllib.parse.quote(query)}"
+    legacy_job_no = str(item.get("id") or item.get("legacyJobNo") or f"{query}-{time.time()}")
+    url = f"https://www.jobkorea.co.kr/Recruit/GI_Read/{legacy_job_no}" if legacy_job_no else f"https://www.jobkorea.co.kr/Search/?stext={urllib.parse.quote(query)}"
     period = item.get("applicationPeriod") or {}
     start = str(period.get("start", ""))[:10]
     end = str(period.get("end", ""))[:10]
     keywords = item.get("_internal_keywordList") or item.get("benefitNameList") or []
     if isinstance(keywords, str):
         keywords = [keywords]
-    return {
-        "id": job_id,
-        "title": clean_text(item.get("title")),
-        "company": clean_text(item.get("postingCompanyName") or item.get("companyName")),
-        "url": url,
-        "period": f"{start} ~ {end}" if start or end else "공고 상세 참고",
-        "career": career_label(item.get("careerType"), item.get("careerRange")),
-        "location": location_label(item.get("areaCodeList")),
-        "keywords": [clean_text(k) for k in keywords[:10]],
-        "readCount": item.get("readCount", 0),
-        "source": "JobKorea",
-    }
+    title = clean_text(item.get("title"))
+    company_name = clean_text(item.get("postingCompanyName") or item.get("companyName"))
+    period_label = f"{start} ~ {end}" if start or end else "공고 상세 참고"
+    raw_text = json.dumps(item, ensure_ascii=False)
+    return build_job_payload(
+        source="jobkorea",
+        source_url=url,
+        raw={
+            "title": title,
+            "company_name": company_name,
+            "career": career_label(item.get("careerType"), item.get("careerRange")),
+            "location": location_label(item.get("areaCodeList")),
+            "salary": clean_text(item.get("salary") or item.get("pay") or "공고 상세 참고"),
+            "period": period_label,
+            "raw_text": raw_text,
+        },
+        job_profile={
+            "company_name": company_name,
+            "job_title": title,
+            "required_skills": [clean_text(k) for k in keywords[:10]],
+            "deadline": format_deadline(end),
+        },
+        job_id=f"jobkorea_{legacy_job_no}",
+    )
 
 
 def career_label(career_type, career_range):
@@ -343,18 +430,27 @@ def parse_posting_url(url):
         title = clean_text(og_match.group(1)) if og_match else "Parsed posting"
     company = "JobKorea" if "jobkorea.co.kr" in url else urllib.parse.urlparse(url).netloc
     bullets = split_summary(visible)
-    return {
-        "id": f"parsed-{abs(hash(url))}",
-        "title": title,
-        "company": company,
-        "url": url,
-        "period": infer_period(visible),
-        "career": infer_career(visible),
-        "location": infer_location(visible),
-        "keywords": infer_keywords(visible),
-        "source": "Parsed URL",
-        "details": bullets,
-    }
+    keywords = infer_keywords(visible)
+    return build_job_payload(
+        source="parsed_url",
+        source_url=url,
+        raw={
+            "title": title,
+            "company_name": company,
+            "career": infer_career(visible),
+            "location": infer_location(visible),
+            "salary": "공고 상세 참고",
+            "period": infer_period(visible),
+            "raw_text": visible,
+        },
+        job_profile={
+            "company_name": company,
+            "job_title": title,
+            "required_skills": keywords,
+            "responsibilities": bullets[:4],
+        },
+        job_id=f"parsed_{abs(hash(url))}",
+    )
 
 
 def split_summary(text):
@@ -396,7 +492,14 @@ def local_match(job):
     state = read_state()
     profile = state.get("profile", {})
     profile_text = " ".join(str(v) for v in profile.values()).lower()
-    job_terms = [job.get("title", ""), job.get("company", ""), " ".join(job.get("keywords", []))]
+    raw = job.get("raw") or {}
+    job_terms = [
+        job_title(job),
+        job_company(job),
+        raw.get("career", ""),
+        raw.get("location", ""),
+        " ".join(job_keywords(job)),
+    ]
     job_text = " ".join(job_terms).lower()
     hits = []
     for token in re.split(r"[,/\s]+", profile_text):
@@ -405,13 +508,13 @@ def local_match(job):
             hits.append(token)
     score = min(96, 52 + len(hits) * 8)
     risks = []
-    if "경력" in job.get("career", "") and "경력" not in profile_text:
+    if "경력" in clean_text((job.get("raw") or {}).get("career")) and "경력" not in profile_text:
         risks.append("경력 연차/직무 적합성 확인 필요")
     if not hits:
         risks.append("이력서/포트폴리오 키워드가 아직 부족함")
     return {
         "score": score,
-        "summary": f"{job.get('company')} 공고는 {', '.join(hits[:4]) or '프로필 보강'} 키워드 기준으로 매칭했습니다.",
+        "summary": f"{job_company(job) or '선택한'} 공고는 {', '.join(hits[:4]) or '프로필 보강'} 키워드 기준으로 매칭했습니다.",
         "strengths": hits[:5] or ["프로필 DM에 이력서/포트폴리오를 넣으면 더 정확해집니다."],
         "risks": risks or ["큰 리스크는 감지되지 않았습니다."],
         "nextActions": ["공고 DM에 자소서 초안을 남기기", "스레드에서 원문 확인", "관심/지원 후보 이모지로 분류"],
@@ -465,12 +568,12 @@ def local_recruiter_search(message):
     top_detail = None
     if jobs:
         try:
-            parsed = parse_posting_url(jobs[0]["url"])
+            parsed = parse_posting_url(jobs[0]["source_url"])
             top_detail = {
-                "title": parsed.get("title"),
-                "period": parsed.get("period"),
-                "keywords": parsed.get("keywords", []),
-                "details": parsed.get("details", [])[:3],
+                "title": job_title(parsed),
+                "period": (parsed.get("raw") or {}).get("period"),
+                "keywords": job_keywords(parsed),
+                "details": ((parsed.get("job_profile") or {}).get("responsibilities") or [])[:3],
             }
         except Exception as exc:
             top_detail = {"error": str(exc)}
@@ -516,6 +619,7 @@ def build_docs_payload():
         },
         "features": [
             {"name": "JobKorea 공고 수집", "status": "implemented", "detail": "JobKorea Search HTML 내 Next.js hydration JSON에서 채용공고 content 배열 추출"},
+            {"name": "공고 JSON 원문 표시", "status": "implemented", "detail": "채널 공고 셀에 JSON_1 형태를 그대로 출력하고 slack_messages는 빈 문자열로 유지"},
             {"name": "동적 채널 관리", "status": "implemented", "detail": "로컬 직군 카탈로그 기반으로 채널 표시/숨김, 사용자 채널 추가/삭제"},
             {"name": "이모지 공고 분류", "status": "implemented", "detail": "👀 관심 있음, ⭐ 지원 후보, ❌ 패스, 💰 연봉 좋음"},
             {"name": "웹 공고 URL 파싱", "status": "implemented", "detail": "URL fetch 후 title, 기간, 경력, 지역, 키워드, 상세 문단 추론"},
@@ -526,6 +630,7 @@ def build_docs_payload():
             {"name": "자연어 검색 DM", "status": "implemented", "detail": "문장에서 핵심 키워드 추출 후 JobKorea 검색"},
             {"name": "검색 봇 DM", "status": "implemented", "detail": "로컬 intent 파서 + JobKorea 크롤링 trace 표시"},
             {"name": "ngrok 외부 공유", "status": "implemented", "detail": "scripts/start_ngrok.sh로 public URL 생성"},
+            {"name": "ChatGPT API 슬랙 메시지 변환", "status": "planned", "detail": "PROMPT_1로 공고 정보를 slack_messages.message_title/message_body로 변환 예정"},
         ],
         "apis": [
             {"method": "GET", "path": "/api/channels", "description": "직군 카탈로그, 활성 채널, 사용자 채널 조회"},
@@ -594,7 +699,7 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.json({"error": "url is required"}, 400)
                 job = parse_posting_url(url)
                 state = read_state()
-                if not any(item.get("url") == url for item in state["directParsedJobs"]):
+                if not any((item.get("source_url") or item.get("url")) == url for item in state["directParsedJobs"]):
                     state["directParsedJobs"].insert(0, job)
                     state["directParsedJobs"] = state["directParsedJobs"][:30]
                     write_state(state)
