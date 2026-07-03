@@ -1,0 +1,146 @@
+[
+  {
+    "id": "pm",
+    "name": "PM/PO",
+    "query": "PM PO 서비스기획",
+    "subtitle": "JobKorea PM/PO/서비스기획 공고 피드",
+    "bookmarks": ["PM", "PO", "서비스기획", "프로덕트"],
+    "category": "기획·전략"
+  },
+  {
+    "id": "planning",
+    "name": "기획·전략",
+    "query": "기획 전략 사업기획",
+    "subtitle": "기획, 전략, 사업개발 공고 피드",
+    "bookmarks": ["사업기획", "전략기획", "서비스기획"],
+    "category": "기획·전략"
+  },
+  {
+    "id": "marketing",
+    "name": "마케팅·광고",
+    "query": "마케팅 광고 퍼포먼스",
+    "subtitle": "마케팅, 광고, 브랜드 공고 피드",
+    "bookmarks": ["퍼포먼스마케팅", "브랜드", "콘텐츠"],
+    "category": "마케팅·홍보"
+  },
+  {
+    "id": "sales",
+    "name": "영업·고객상담",
+    "query": "영업 고객상담 B2B",
+    "subtitle": "영업, 영업관리, 고객상담 공고 피드",
+    "bookmarks": ["B2B", "영업관리", "고객상담"],
+    "category": "영업·고객상담"
+  },
+  {
+    "id": "hr",
+    "name": "인사·총무",
+    "query": "인사 총무 채용",
+    "subtitle": "인사, 채용, 총무 공고 피드",
+    "bookmarks": ["HR", "채용", "총무"],
+    "category": "인사·총무"
+  },
+  {
+    "id": "finance",
+    "name": "회계·세무·재무",
+    "query": "회계 세무 재무",
+    "subtitle": "회계, 세무, 재무 공고 피드",
+    "bookmarks": ["회계", "세무", "재무"],
+    "category": "회계·세무·재무"
+  },
+  {
+    "id": "server",
+    "name": "서버/백엔드",
+    "query": "서버 백엔드 개발자",
+    "subtitle": "JobKorea 서버/백엔드 공고 피드",
+    "bookmarks": ["Backend", "API", "Spring", "Node"],
+    "category": "IT·개발"
+  },
+  {
+    "id": "frontend",
+    "name": "프론트엔드",
+    "query": "프론트엔드 React 개발자",
+    "subtitle": "프론트엔드, 웹 개발 공고 피드",
+    "bookmarks": ["React", "Vue", "JavaScript"],
+    "category": "IT·개발"
+  },
+  {
+    "id": "ios",
+    "name": "iOS 개발",
+    "query": "iOS Swift 개발자",
+    "subtitle": "JobKorea iOS 앱 개발 공고 피드",
+    "bookmarks": ["iOS", "Swift", "UIKit", "앱개발"],
+    "category": "IT·개발"
+  },
+  {
+    "id": "android",
+    "name": "Android 개발",
+    "query": "Android Kotlin 개발자",
+    "subtitle": "Android 앱 개발 공고 피드",
+    "bookmarks": ["Android", "Kotlin", "앱개발"],
+    "category": "IT·개발"
+  },
+  {
+    "id": "data",
+    "name": "데이터·AI",
+    "query": "데이터 AI 머신러닝",
+    "subtitle": "데이터 분석, AI, ML 공고 피드",
+    "bookmarks": ["데이터분석", "AI", "Python", "SQL"],
+    "category": "IT·개발"
+  },
+  {
+    "id": "devops",
+    "name": "DevOps·인프라",
+    "query": "DevOps 인프라 클라우드",
+    "subtitle": "DevOps, 인프라, 클라우드 공고 피드",
+    "bookmarks": ["AWS", "Kubernetes", "CI/CD"],
+    "category": "IT·개발"
+  },
+  {
+    "id": "design",
+    "name": "디자인",
+    "query": "UX UI 디자인",
+    "subtitle": "UX/UI, 프로덕트, 그래픽 디자인 공고 피드",
+    "bookmarks": ["UX", "UI", "Figma", "브랜드"],
+    "category": "디자인"
+  },
+  {
+    "id": "media",
+    "name": "미디어·콘텐츠",
+    "query": "콘텐츠 영상 편집",
+    "subtitle": "콘텐츠, 영상, 에디터 공고 피드",
+    "bookmarks": ["콘텐츠", "영상", "편집"],
+    "category": "미디어·문화"
+  },
+  {
+    "id": "production",
+    "name": "생산·제조",
+    "query": "생산 제조 품질",
+    "subtitle": "생산, 제조, 품질관리 공고 피드",
+    "bookmarks": ["생산", "품질", "공정"],
+    "category": "생산·제조"
+  },
+  {
+    "id": "research",
+    "name": "연구·R&D",
+    "query": "연구개발 R&D",
+    "subtitle": "연구개발, R&D 공고 피드",
+    "bookmarks": ["R&D", "연구개발", "기술"],
+    "category": "연구·R&D"
+  },
+  {
+    "id": "education",
+    "name": "교육",
+    "query": "교육 강사 운영",
+    "subtitle": "교육, 강사, 교육운영 공고 피드",
+    "bookmarks": ["교육운영", "강사", "러닝"],
+    "category": "교육"
+  },
+  {
+    "id": "medical",
+    "name": "의료·바이오",
+    "query": "의료 바이오 제약",
+    "subtitle": "의료, 바이오, 제약 공고 피드",
+    "bookmarks": ["바이오", "제약", "의료"],
+    "category": "의료·바이오"
+  }
+]

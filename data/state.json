@@ -1,0 +1,19 @@
+{
+  "notes": {},
+  "classifications": {},
+  "profile": {
+    "resume": "",
+    "portfolio": "",
+    "skills": "PM, 서비스기획, 데이터분석, iOS, Swift, 서버개발, API",
+    "preferences": "성장 가능성, 좋은 동료, 명확한 역할, 합리적인 연봉"
+  },
+  "directParsedJobs": [],
+  "enabledChannelIds": [
+    "pm",
+    "ios",
+    "server",
+    "frontend",
+    "data"
+  ],
+  "customChannels": []
+}

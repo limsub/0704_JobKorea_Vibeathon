@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JobKorea Vibe</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="history-controls" aria-label="history controls">
+          <button class="icon-button" aria-label="Back">‹</button>
+          <button class="icon-button" aria-label="Forward">›</button>
+          <button class="icon-button" aria-label="History">◷</button>
+        </div>
+        <button class="search-trigger" id="searchTrigger">
+          <span class="search-icon">⌕</span>
+          <span>Search JobKorea Vibe</span>
+          <kbd>⌘K</kbd>
+        </button>
+        <div class="topbar-actions">
+          <button class="status-chip"><span class="live-dot"></span> Huddle</button>
+          <button class="icon-button" aria-label="Help">?</button>
+          <button class="avatar avatar-small" aria-label="Profile">S</button>
+        </div>
+      </header>
+
+      <aside class="rail">
+        <button class="workspace-switch active" aria-label="JobKorea Vibe">J</button>
+        <button class="workspace-switch" aria-label="Hackathon">H</button>
+        <button class="rail-item active" aria-label="Home">
+          <span class="rail-icon">⌂</span>
+          <span>Home</span>
+        </button>
+        <button class="rail-item" aria-label="DMs">
+          <span class="rail-icon">☰</span>
+          <span>DMs</span>
+        </button>
+        <button class="rail-item" aria-label="Activity">
+          <span class="rail-icon">◷</span>
+          <span>Activity</span>
+        </button>
+        <button class="rail-item" aria-label="Later">
+          <span class="rail-icon">☆</span>
+          <span>Later</span>
+        </button>
+        <button class="rail-compose" aria-label="Compose">✎</button>
+      </aside>
+
+      <nav class="sidebar">
+        <section class="workspace-card">
+          <div>
+            <h1>JobKorea Vibe</h1>
+            <p><span class="presence-dot"></span> ngrok share ready</p>
+          </div>
+          <button class="icon-button light" aria-label="New message">✎</button>
+        </section>
+
+        <section class="sidebar-section compact">
+          <button class="sidebar-row">
+            <span class="row-icon">▣</span>
+            <span>Threads</span>
+            <span class="sidebar-count">3</span>
+          </button>
+          <button class="sidebar-row">
+            <span class="row-icon">@</span>
+            <span>Mentions & reactions</span>
+            <span class="sidebar-count urgent">2</span>
+          </button>
+          <button class="sidebar-row">
+            <span class="row-icon">⌁</span>
+            <span>Drafts & sent</span>
+          </button>
+        </section>
+
+        <section class="sidebar-section">
+          <button class="section-title" data-collapse="channels">
+            <span>⌄</span>
+            <strong>Channels</strong>
+          </button>
+          <div id="channels" class="section-list"></div>
+        </section>
+
+        <section class="sidebar-section">
+          <button class="section-title" data-collapse="directs">
+            <span>⌄</span>
+            <strong>Direct messages</strong>
+          </button>
+          <div id="directs" class="section-list"></div>
+        </section>
+      </nav>
+
+      <main class="conversation">
+        <div class="channel-header">
+          <div>
+            <button class="channel-title" id="channelTitle"># general</button>
+            <p id="channelSubtitle">Company-wide announcements and work-based matters</p>
+          </div>
+          <div class="channel-actions">
+            <button class="huddle-button"><span class="live-dot"></span> Start huddle</button>
+            <button class="pill-button"><span>👥</span><span id="memberCount">24</span></button>
+            <button class="icon-button surface" aria-label="Canvas">▤</button>
+            <button class="icon-button surface" aria-label="More">⋯</button>
+          </div>
+        </div>
+
+        <div class="channel-tabs">
+          <button class="tab active">Messages</button>
+          <button class="tab">Canvas</button>
+          <button class="tab">Files</button>
+          <button class="tab">Workflows</button>
+          <div class="bookmarks" id="bookmarks"></div>
+        </div>
+
+        <div class="message-list" id="messageList" aria-live="polite"></div>
+
+        <form class="composer" id="composer">
+          <div class="composer-tools">
+            <button type="button" class="tool-button">B</button>
+            <button type="button" class="tool-button italic">I</button>
+            <button type="button" class="tool-button">S</button>
+            <button type="button" class="tool-button">≡</button>
+            <button type="button" class="tool-button">`</button>
+            <button type="button" class="tool-button">🔗</button>
+          </div>
+          <textarea id="messageInput" rows="3" placeholder="Message #general"></textarea>
+          <div class="composer-footer">
+            <div>
+              <button type="button" class="tool-button">＋</button>
+              <button type="button" class="tool-button">Aa</button>
+              <button type="button" class="tool-button">☺</button>
+              <button type="button" class="tool-button">@</button>
+              <button type="button" class="tool-button">🎙</button>
+            </div>
+            <div class="composer-actions">
+              <span class="composer-hint">Shift Enter for a new line</span>
+              <button class="send-button" type="submit">Send</button>
+            </div>
+          </div>
+        </form>
+      </main>
+
+      <aside class="thread-panel" id="threadPanel">
+        <div class="thread-header">
+          <div>
+            <h2>Thread</h2>
+            <p id="threadChannel"># general</p>
+          </div>
+          <button class="icon-button surface" id="closeThread" aria-label="Close thread">×</button>
+        </div>
+        <div class="thread-body" id="threadBody"></div>
+        <form class="thread-reply" id="threadReply">
+          <input id="threadInput" type="text" placeholder="Reply..." />
+          <button type="submit">➤</button>
+        </form>
+      </aside>
+    </div>
+
+    <div class="search-overlay" id="searchOverlay" aria-hidden="true">
+      <div class="search-modal" role="dialog" aria-label="Search">
+        <input id="searchInput" type="search" placeholder="Search JobKorea Vibe" />
+        <div class="search-filters">
+          <button>Messages</button>
+          <button>Files</button>
+          <button>Channels</button>
+          <button>People</button>
+        </div>
+        <div id="searchResults" class="search-results"></div>
+      </div>
+    </div>
+
+    <div class="search-overlay" id="channelOverlay" aria-hidden="true">
+      <div class="search-modal channel-modal" role="dialog" aria-label="Channel manager">
+        <div class="modal-header">
+          <div>
+            <h2>채널 관리</h2>
+            <p>로컬 직군 목록에서 표시할 채널을 고르고, 필요한 검색 키워드 채널을 추가합니다.</p>
+          </div>
+          <button class="icon-button surface" id="closeChannelManager" aria-label="Close channel manager">×</button>
+        </div>
+        <form class="custom-channel-form" id="customChannelForm">
+          <input name="name" type="text" placeholder="채널 이름" autocomplete="off" />
+          <input name="query" type="text" placeholder="JobKorea 검색 키워드" autocomplete="off" />
+          <button type="submit">추가</button>
+        </form>
+        <input id="channelFilter" class="manager-search" type="search" placeholder="직군, 키워드, 카테고리 검색" />
+        <div id="channelManager" class="channel-manager"></div>
+      </div>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
