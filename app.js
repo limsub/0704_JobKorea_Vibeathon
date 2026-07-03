@@ -240,9 +240,8 @@ function renderSidebar() {
     job,
   }));
   const fixed = [
-    { id: "ai-search", name: "검색 봇", icon: "⌕" },
+    { id: "search", name: "Search", icon: "⌕" },
     { id: "profile", name: "Resume & Portfolio", icon: "📎" },
-    { id: "search", name: "Search DM", icon: "⌕" },
   ];
 
   directList.innerHTML = fixed.map((dm) => `
@@ -550,18 +549,20 @@ function renderExtractedTextResult(analysis, extractedText) {
 }
 
 function renderSearchDm() {
-  channelTitle.textContent = "Search DM";
-  channelSubtitle.textContent = "자연어로 JobKorea 공고를 검색합니다. 예: LG전자에서 SW 개발 직군 공고 보여줘";
+  channelTitle.textContent = "Search";
+  channelSubtitle.textContent = "자연어 입력 → 로컬 키워드 파싱 → JobKorea 크롤링 → 공고 10개 출력";
   memberCount.textContent = "search";
-  bookmarks.innerHTML = `<button class="bookmark">natural language</button><button class="bookmark">JobKorea search</button>`;
-  messageInput.placeholder = "NC 채용 공고 보여줘";
+  bookmarks.innerHTML = `<button class="bookmark">local intent</button><button class="bookmark">JobKorea crawl</button><button class="bookmark">10 results</button>`;
+  messageInput.placeholder = "LG전자 SW 개발자 채용 공고 보여줘";
   messageList.innerHTML = `
     <section class="channel-intro">
       <div class="intro-icon">⌕</div>
-      <h2>Search DM</h2>
+      <h2>Search</h2>
       <p>검색 문장을 보내면 로컬 서버가 핵심 키워드를 뽑아 JobKorea에서 검색하고, 결과를 DM 답장처럼 보여줍니다.</p>
     </section>
-    <div id="searchDmResults">${emptyBlock("검색어를 입력해보세요.")}</div>
+    <div id="searchDmResults">
+      ${state.searchBotMessages.length ? timelineItems(state.searchBotMessages).map(renderSearchTurn).join("") : emptyBlock("원하는 공고를 자연어로 입력해보세요.")}
+    </div>
   `;
   renderSearchThread();
 }
@@ -649,8 +650,8 @@ function renderProfileThread() {
 function renderSearchThread() {
   threadChannel.textContent = "# search";
   threadBody.innerHTML = `
-    <div class="thread-context"><span>검색 방식</span><strong>local NLP</strong></div>
-    <div class="empty-thread">예: “NC 채용 공고 보여줘”, “LG전자에서 SW 개발 직군 공고 보여줘”</div>
+    <div class="thread-context"><span>검색 방식</span><strong>local parser + crawler</strong></div>
+    <div class="empty-thread">예: “NC 채용 공고 보여줘”, “LG전자 SW 개발자 채용 공고 보여줘”</div>
   `;
 }
 
@@ -663,6 +664,10 @@ function renderAiSearchThread() {
 }
 
 function renderAiSearchTurn(turn) {
+  return renderSearchTurn(turn);
+}
+
+function renderSearchTurn(turn) {
   return `
     <article class="message">
       <div class="message-avatar" style="background:#007a5a">ME</div>
@@ -674,7 +679,7 @@ function renderAiSearchTurn(turn) {
     <article class="message">
       <div class="message-avatar" style="background:#1264a3">JK</div>
       <div class="message-content">
-        <div class="message-meta"><span class="message-name">검색 봇</span><span class="message-time">${turn.response.aiTrace.mode}</span></div>
+        <div class="message-meta"><span class="message-name">Search</span><span class="message-time">${turn.response.aiTrace.mode}</span></div>
         <div class="message-text">${escapeHtml(turn.response.answer)}</div>
         ${renderAiTrace(turn.response)}
         <div class="day-divider"><span>crawled jobs</span></div>
@@ -772,16 +777,29 @@ async function submitComposer(text) {
   }
 
   if (state.activeMode === "dm" && state.activeDm === "search") {
-    const query = extractSearchQuery(text);
-    const data = await api(`/api/search?q=${encodeURIComponent(query)}`);
-    const container = document.querySelector("#searchDmResults");
-    container.innerHTML = `
-      <div class="day-divider"><span>${escapeHtml(query)} results</span></div>
-      ${timelineItems(data.jobs || []).map(renderJobMessage).join("") || emptyBlock("검색 결과가 없습니다.")}
-    `;
-    state.jobs.search = data.jobs || [];
-    renderSidebar();
-    scrollToBottom(messageList);
+    const pending = {
+      time: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+      message: text,
+      response: {
+        answer: "Search가 문장을 해석하고 JobKorea를 크롤링하는 중입니다.",
+        aiTrace: { mode: "running", resultCount: 0, steps: ["request sent"] },
+        jobs: [],
+      },
+    };
+    state.searchBotMessages.unshift(pending);
+    render();
+    try {
+      const data = await api("/api/ai-search", { method: "POST", body: JSON.stringify({ message: text }) });
+      pending.response = data;
+      state.jobs.search = data.jobs || [];
+    } catch (err) {
+      pending.response = {
+        answer: `검색 중 오류가 발생했습니다: ${err.message}`,
+        aiTrace: { mode: "error", resultCount: 0, steps: ["request failed"] },
+        jobs: [],
+      };
+    }
+    render();
     return;
   }
 
@@ -1016,6 +1034,12 @@ composer.addEventListener("submit", async (event) => {
   if (!text) return;
   messageInput.value = "";
   await submitComposer(text).catch((err) => alert(err.message));
+});
+
+messageInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.shiftKey) return;
+  event.preventDefault();
+  composer.requestSubmit();
 });
 
 customChannelForm.addEventListener("submit", async (event) => {

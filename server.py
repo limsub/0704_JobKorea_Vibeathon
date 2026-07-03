@@ -1347,7 +1347,7 @@ def location_label(area_codes):
     return "공고 상세 참고"
 
 
-def search_jobkorea(query, limit=8):
+def search_jobkorea(query, limit=10):
     url = f"https://www.jobkorea.co.kr/Search/?stext={urllib.parse.quote(query)}"
     text = fetch_text(url)
     content = extract_job_content(text)
@@ -1474,25 +1474,38 @@ def local_search_intent(message):
         .replace("에서", " ")
     )
     tokens = [token for token in re.split(r"[\s,./]+", normalized) if token]
-    known_roles = ["PM", "PO", "iOS", "Swift", "서버", "백엔드", "프론트엔드", "Android", "데이터", "AI", "기획", "디자인", "마케팅", "DevOps"]
+    known_roles = [
+        "PM", "PO", "iOS", "Swift", "Android", "SW", "AI", "QA", "DevOps",
+        "개발자", "소프트웨어", "서버", "백엔드", "프론트엔드", "웹", "앱",
+        "데이터", "기획", "디자인", "마케팅", "보안",
+    ]
     role_terms = [role for role in known_roles if role.lower() in text.lower()]
+    role_term_set = {role.lower() for role in role_terms}
+    known_locations = ["서울", "경기", "성남", "판교", "부산", "대전", "대구", "인천", "수도권", "재택", "원격"]
+    location_terms = [location for location in known_locations if location in text]
     company_terms = []
     for token in tokens:
-        if token in role_terms:
+        if token.lower() in role_term_set:
+            continue
+        if token in location_terms:
             continue
         if len(token) >= 2 and token not in ["개발", "직군", "공고", "신입", "경력"]:
             company_terms.append(token)
     query_parts = []
     if company_terms:
         query_parts.append(company_terms[0])
+    elif location_terms:
+        query_parts.append(location_terms[0])
     query_parts.extend(role_terms[:3])
+    if company_terms:
+        query_parts.extend(location_terms[:2])
     if not query_parts:
         query_parts = tokens[:4] or ["개발자"]
     return {
         "query": " ".join(query_parts),
         "company": company_terms[0] if company_terms else "",
         "role": " ".join(role_terms),
-        "location": "",
+        "location": " ".join(location_terms),
         "seniority": "경력" if "경력" in text else "신입" if "신입" in text else "",
         "keywords": query_parts,
         "reason": "로컬 파서가 회사명/직무 키워드를 추출했습니다.",
@@ -1503,7 +1516,7 @@ def local_recruiter_search(message):
     intent = local_search_intent(message)
     query = intent.get("query") or "개발자"
     crawl_url = f"https://www.jobkorea.co.kr/Search/?stext={urllib.parse.quote(query)}"
-    jobs = search_jobkorea(query, limit=8)
+    jobs = search_jobkorea(query, limit=10)
     top_detail = None
     if jobs:
         try:
