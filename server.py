@@ -761,17 +761,36 @@ def find_runtime_binary(name):
     return ""
 
 
+def run_tesseract(image_path, languages):
+    tesseract = find_runtime_binary("tesseract")
+    if not tesseract:
+        return ""
+    try:
+        completed = subprocess.run(
+            [tesseract, image_path, "stdout", "-l", languages, "--psm", os.environ.get("TESSERACT_PSM", "6")],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=45,
+        )
+        return normalize_extracted_text(completed.stdout)
+    except Exception:
+        return ""
+
+
 def extract_text_with_ocr(pdf_bytes, page_count):
     pdftoppm = find_runtime_binary("pdftoppm")
     if not pdftoppm:
-        return "", "ocr_unavailable"
-    try:
-        from ocrmac.ocrmac import OCR
-    except Exception:
-        return "", "ocr_unavailable"
+        return "", "ocr_unavailable:pdftoppm"
+    if not find_runtime_binary("tesseract"):
+        return "", "ocr_unavailable:tesseract"
 
     max_pages = min(max(page_count or 1, 1), int(os.environ.get("OCR_MAX_PAGES", OCR_MAX_PAGES)))
     dpi = int(os.environ.get("OCR_DPI", OCR_DPI))
+    language_candidates = [
+        os.environ.get("TESSERACT_LANGS", "kor+eng"),
+        "eng",
+    ]
     with tempfile.TemporaryDirectory(prefix="profile-pdf-ocr-") as tmpdir:
         pdf_path = os.path.join(tmpdir, "input.pdf")
         prefix = os.path.join(tmpdir, "page")
@@ -788,25 +807,19 @@ def extract_text_with_ocr(pdf_bytes, page_count):
             image_path = f"{prefix}-{page_number}.png"
             if not os.path.exists(image_path):
                 continue
-            try:
-                ocr = OCR(image_path, language_preference=["ko-KR", "en-US"])
-                rows = ocr.recognize()
-            except Exception:
-                continue
-            page_lines = []
-            for row in rows:
-                if not row:
+            page_text = ""
+            for languages in language_candidates:
+                if not languages:
                     continue
-                text = clean_text(row[0])
-                if text:
-                    page_lines.append(text)
-            page_text = normalize_extracted_text("\n".join(page_lines))
+                page_text = run_tesseract(image_path, languages)
+                if is_useful_extracted_text(page_text):
+                    break
             if page_text:
                 pages.append(f"[Page {page_number}]\n{page_text}")
         text = normalize_extracted_text("\n\n".join(pages))
     if not is_useful_extracted_text(text):
         return "", "ocr_no_text"
-    return text, "macos_vision_ocr"
+    return text, "tesseract_ocr"
 
 
 def decode_pdf_literal(value):
@@ -1068,9 +1081,6 @@ def analyze_profile_pdf_upload(headers, body, state):
 
     extracted = extract_pdf_text(pdf_bytes)
     extracted_text = extracted.get("text", "")
-    if not extracted_text:
-        raise ValueError("No selectable text was found in this PDF")
-
     source_document = {
         "document_id": f"profile_pdf_{int(time.time())}",
         "document_type": document_type,
@@ -1083,8 +1093,27 @@ def analyze_profile_pdf_upload(headers, body, state):
         "sent_to_ai_char_count": min(len(extracted_text), MAX_OPENAI_TEXT_CHARS),
         "truncated_for_ai": len(extracted_text) > MAX_OPENAI_TEXT_CHARS,
         "language": ["ko", "en"],
-        "parse_status": "success",
+        "parse_status": "success" if extracted_text else "no_text",
     }
+    if not extracted_text:
+        analysis.update({
+            "status": "text_extraction_failed",
+            "locked": False,
+            "lastError": "No selectable text was found. Configure Tesseract OCR on the server for image-only PDFs.",
+            "sourceDocument": source_document,
+            "extractedText": "",
+            "convertedJsonText": "",
+            "result": "",
+            "model": os.environ.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL),
+            "attemptedAt": iso_now(),
+            "completedAt": iso_now(),
+        })
+        write_state(state)
+        return {
+            "ok": True,
+            "analysis": analysis,
+            "profile": state.get("profile", {}),
+        }, 200
 
     analysis.update({
         "status": "text_extracted",

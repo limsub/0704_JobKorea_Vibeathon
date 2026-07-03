@@ -51,6 +51,18 @@ ngrok config add-authtoken <your-token>
 - `data/job_roles.json`: 로컬 직군 채널 카탈로그
 - `data/state.json`: 채널 표시 상태, 메모, 분류, 프로필 저장
 - `dashboard.html`: 구현 상태 대시보드
-- `requirements.txt`: PDF 텍스트 추출용 `pypdf`
+- `requirements.txt`: PDF 텍스트 레이어 추출용 `pypdf`
+- `Dockerfile`: 서버 배포용 Poppler + Tesseract OCR 런타임
 
 Resume & Portfolio DM은 PDF 파일만 업로드할 수 있고, OpenAI Responses API 분석은 상태 파일 기준 1회만 시도합니다. 자연어 검색은 로컬 키워드 파서로 검색어를 만들고, JobKorea 검색 결과 HTML을 크롤링합니다.
+
+## 실제 서버 배포
+
+Cloudflare quick tunnel은 로컬 서버를 임시로 외부 공개하는 방식입니다. 실제 서버 배포는 Docker 기반으로 진행합니다.
+
+```bash
+docker build -t jobkorea-vibe .
+docker run --rm -p 8080:8080 -e OPENAI_API_KEY=... jobkorea-vibe
+```
+
+배포용 OCR은 macOS Vision이 아니라 Linux 서버에서도 동작하는 Tesseract를 사용합니다. Dockerfile은 `poppler-utils`, `tesseract-ocr`, `tesseract-ocr-kor`를 설치합니다.
