@@ -3,9 +3,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+source "$ROOT_DIR/scripts/python_env.sh"
 
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-5174}"
+ensure_python_env "$ROOT_DIR"
 
 if ! command -v ngrok >/dev/null 2>&1; then
   echo "ngrok is not installed. Install it first, then run this script again."
@@ -20,7 +22,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-HOST="$HOST" PORT="$PORT" python3 server.py &
+HOST="$HOST" PORT="$PORT" "$PYTHON_BIN" server.py &
 SERVER_PID="$!"
 sleep 1
 

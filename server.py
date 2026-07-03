@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
+import datetime
 import html
+import io
 import json
 import os
 import re
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -13,6 +17,10 @@ DATA_DIR = os.path.join(ROOT, "data")
 STATE_PATH = os.path.join(DATA_DIR, "state.json")
 ROLE_CATALOG_PATH = os.path.join(DATA_DIR, "job_roles.json")
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+MAX_UPLOAD_BYTES = 12 * 1024 * 1024
+MAX_OPENAI_TEXT_CHARS = 80000
+OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
+DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 
 DEFAULT_ENABLED_CHANNEL_IDS = ["pm", "ios", "server", "frontend", "data"]
 
@@ -33,12 +41,393 @@ DEFAULT_PROFILE = {
     "preferences": "성장 가능성, 좋은 동료, 명확한 역할, 합리적인 연봉",
 }
 
+DEFAULT_PROFILE_ANALYSIS = {
+    "status": "not_started",
+    "attempts": 0,
+    "locked": False,
+    "lastError": "",
+    "sourceDocument": None,
+    "result": None,
+    "model": "",
+    "attemptedAt": "",
+    "completedAt": "",
+}
+
+PROFILE_ANALYSIS_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["candidate_profile", "matching_profile", "ai_analysis_result"],
+    "properties": {
+        "candidate_profile": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "personal_info",
+                "headline",
+                "summary",
+                "career",
+                "skills",
+                "work_experiences",
+                "projects",
+                "education",
+                "certifications",
+                "awards",
+            ],
+            "properties": {
+                "personal_info": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["name", "email", "phone", "location", "links"],
+                    "properties": {
+                        "name": {"type": "string"},
+                        "email": {"type": "string"},
+                        "phone": {"type": "string"},
+                        "location": {"type": "string"},
+                        "links": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["portfolio", "github", "linkedin", "blog", "other"],
+                            "properties": {
+                                "portfolio": {"type": "string"},
+                                "github": {"type": "string"},
+                                "linkedin": {"type": "string"},
+                                "blog": {"type": "string"},
+                                "other": {"type": "array", "items": {"type": "string"}},
+                            },
+                        },
+                    },
+                },
+                "headline": {"type": "string"},
+                "summary": {"type": "string"},
+                "career": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "total_years_of_experience",
+                        "seniority_level",
+                        "current_or_recent_role",
+                        "desired_roles",
+                        "preferred_industries",
+                    ],
+                    "properties": {
+                        "total_years_of_experience": {"type": "number"},
+                        "seniority_level": {"type": "string"},
+                        "current_or_recent_role": {"type": "string"},
+                        "desired_roles": {"type": "array", "items": {"type": "string"}},
+                        "preferred_industries": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                "skills": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["technical_skills", "tools", "soft_skills", "languages"],
+                    "properties": {
+                        "technical_skills": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": ["name", "category", "level", "evidence"],
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "category": {"type": "string"},
+                                    "level": {"type": "string"},
+                                    "evidence": {"type": "string"},
+                                },
+                            },
+                        },
+                        "tools": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": ["name", "category", "level", "evidence"],
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "category": {"type": "string"},
+                                    "level": {"type": "string"},
+                                    "evidence": {"type": "string"},
+                                },
+                            },
+                        },
+                        "soft_skills": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": ["name", "evidence"],
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "evidence": {"type": "string"},
+                                },
+                            },
+                        },
+                        "languages": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": ["name", "proficiency"],
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "proficiency": {"type": "string"},
+                                },
+                            },
+                        },
+                    },
+                },
+                "work_experiences": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": [
+                            "company",
+                            "position",
+                            "department",
+                            "employment_type",
+                            "start_date",
+                            "end_date",
+                            "is_current",
+                            "responsibilities",
+                            "achievements",
+                            "tech_stack",
+                            "evidence",
+                        ],
+                        "properties": {
+                            "company": {"type": "string"},
+                            "position": {"type": "string"},
+                            "department": {"type": "string"},
+                            "employment_type": {"type": "string"},
+                            "start_date": {"type": "string"},
+                            "end_date": {"type": "string"},
+                            "is_current": {"type": "boolean"},
+                            "responsibilities": {"type": "array", "items": {"type": "string"}},
+                            "achievements": {"type": "array", "items": {"type": "string"}},
+                            "tech_stack": {"type": "array", "items": {"type": "string"}},
+                            "evidence": {"type": "string"},
+                        },
+                    },
+                },
+                "projects": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": [
+                            "name",
+                            "role",
+                            "start_date",
+                            "end_date",
+                            "description",
+                            "problem",
+                            "solution",
+                            "impact",
+                            "contribution",
+                            "tech_stack",
+                            "links",
+                            "evidence",
+                        ],
+                        "properties": {
+                            "name": {"type": "string"},
+                            "role": {"type": "string"},
+                            "start_date": {"type": "string"},
+                            "end_date": {"type": "string"},
+                            "description": {"type": "string"},
+                            "problem": {"type": "string"},
+                            "solution": {"type": "string"},
+                            "impact": {"type": "string"},
+                            "contribution": {"type": "string"},
+                            "tech_stack": {"type": "array", "items": {"type": "string"}},
+                            "links": {"type": "array", "items": {"type": "string"}},
+                            "evidence": {"type": "string"},
+                        },
+                    },
+                },
+                "education": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["school", "major", "degree", "start_date", "end_date", "status"],
+                        "properties": {
+                            "school": {"type": "string"},
+                            "major": {"type": "string"},
+                            "degree": {"type": "string"},
+                            "start_date": {"type": "string"},
+                            "end_date": {"type": "string"},
+                            "status": {"type": "string"},
+                        },
+                    },
+                },
+                "certifications": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["name", "issuer", "issued_date"],
+                        "properties": {
+                            "name": {"type": "string"},
+                            "issuer": {"type": "string"},
+                            "issued_date": {"type": "string"},
+                        },
+                    },
+                },
+                "awards": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["name", "issuer", "date", "description"],
+                        "properties": {
+                            "name": {"type": "string"},
+                            "issuer": {"type": "string"},
+                            "date": {"type": "string"},
+                            "description": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        },
+        "matching_profile": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "primary_job_categories",
+                "recommended_job_titles",
+                "core_keywords",
+                "strong_match_signals",
+                "weak_match_signals",
+                "preferred_work_style",
+            ],
+            "properties": {
+                "primary_job_categories": {"type": "array", "items": {"type": "string"}},
+                "recommended_job_titles": {"type": "array", "items": {"type": "string"}},
+                "core_keywords": {"type": "array", "items": {"type": "string"}},
+                "strong_match_signals": {"type": "array", "items": {"type": "string"}},
+                "weak_match_signals": {"type": "array", "items": {"type": "string"}},
+                "preferred_work_style": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["remote", "employment_type", "location"],
+                    "properties": {
+                        "remote": {"type": "string"},
+                        "employment_type": {"type": "array", "items": {"type": "string"}},
+                        "location": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+        },
+        "ai_analysis_result": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "overall_summary",
+                "candidate_type",
+                "career_level_assessment",
+                "strengths",
+                "risks_or_gaps",
+                "recommended_roles",
+                "improvement_suggestions",
+                "chat_display_message",
+                "confidence",
+            ],
+            "properties": {
+                "overall_summary": {"type": "string"},
+                "candidate_type": {"type": "string"},
+                "career_level_assessment": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["level", "reason"],
+                    "properties": {
+                        "level": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                },
+                "strengths": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["title", "description", "evidence"],
+                        "properties": {
+                            "title": {"type": "string"},
+                            "description": {"type": "string"},
+                            "evidence": {"type": "string"},
+                        },
+                    },
+                },
+                "risks_or_gaps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["title", "description", "severity"],
+                        "properties": {
+                            "title": {"type": "string"},
+                            "description": {"type": "string"},
+                            "severity": {"type": "string"},
+                        },
+                    },
+                },
+                "recommended_roles": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["role", "reason", "confidence"],
+                        "properties": {
+                            "role": {"type": "string"},
+                            "reason": {"type": "string"},
+                            "confidence": {"type": "number"},
+                        },
+                    },
+                },
+                "improvement_suggestions": {"type": "array", "items": {"type": "string"}},
+                "chat_display_message": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["title", "summary", "bullets"],
+                    "properties": {
+                        "title": {"type": "string"},
+                        "summary": {"type": "string"},
+                        "bullets": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                "confidence": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["overall", "missing_information"],
+                    "properties": {
+                        "overall": {"type": "number"},
+                        "missing_information": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+        },
+    },
+}
+
+PROFILE_ANALYSIS_PROMPT = """
+너는 채용 매칭 서비스의 이력서/포트폴리오 분석 엔진이다.
+입력은 PDF에서 추출한 텍스트이며, 출력은 반드시 지정된 JSON schema와 일치해야 한다.
+
+원칙:
+- 텍스트에 근거가 있는 사실만 구조화한다.
+- 불명확하거나 없는 정보는 빈 문자열, 빈 배열, 0, unknown 중 가장 자연스러운 값으로 둔다.
+- evidence에는 원문에서 어떤 부분을 근거로 삼았는지 짧게 한국어로 적는다.
+- 매칭에 유용한 직무명, 기술 키워드, 강점/약점 신호를 적극적으로 정리한다.
+- ai_analysis_result는 채팅창에 바로 보여줄 수 있는 한국어 분석 결과로 작성한다.
+- 개인정보는 원문에 있는 경우에만 추출한다.
+""".strip()
+
 
 def default_state():
     return {
         "notes": {},
         "classifications": {},
         "profile": dict(DEFAULT_PROFILE),
+        "profileAnalysis": dict(DEFAULT_PROFILE_ANALYSIS),
         "directParsedJobs": [],
         "enabledChannelIds": list(DEFAULT_ENABLED_CHANNEL_IDS),
         "customChannels": [],
@@ -64,6 +453,14 @@ def ensure_state():
         if key not in state["profile"]:
             state["profile"][key] = value
             changed = True
+    if "profileAnalysis" not in state or not isinstance(state["profileAnalysis"], dict):
+        state["profileAnalysis"] = dict(DEFAULT_PROFILE_ANALYSIS)
+        changed = True
+    else:
+        for key, value in DEFAULT_PROFILE_ANALYSIS.items():
+            if key not in state["profileAnalysis"]:
+                state["profileAnalysis"][key] = value
+                changed = True
     if changed:
         write_state(state)
 
@@ -234,6 +631,395 @@ def clean_text(value):
     value = re.sub(r"\\u0026", "&", value)
     value = re.sub(r"\s+", " ", value)
     return value.strip()
+
+
+def iso_now():
+    tz = datetime.timezone(datetime.timedelta(hours=9))
+    return datetime.datetime.now(tz).isoformat(timespec="seconds")
+
+
+def normalize_extracted_text(value):
+    value = str(value or "").replace("\x00", " ")
+    value = re.sub(r"[ \t]+", " ", value)
+    value = re.sub(r"\n{3,}", "\n\n", value)
+    return value.strip()
+
+
+def parse_content_disposition(value):
+    result = {}
+    for part in value.split(";"):
+        part = part.strip()
+        if "=" not in part:
+            result.setdefault("type", part.lower())
+            continue
+        key, raw = part.split("=", 1)
+        result[key.strip().lower()] = raw.strip().strip('"')
+    return result
+
+
+def read_multipart_form(headers, body):
+    content_type = headers.get("Content-Type") or headers.get("content-type") or ""
+    boundary_match = re.search(r'boundary="?([^";]+)"?', content_type)
+    if not boundary_match:
+        raise ValueError("multipart boundary is missing")
+    boundary = ("--" + boundary_match.group(1)).encode("utf-8")
+    fields = {}
+    files = {}
+    for part in body.split(boundary):
+        part = part.strip(b"\r\n")
+        if not part or part == b"--":
+            continue
+        if part.endswith(b"--"):
+            part = part[:-2].rstrip(b"\r\n")
+        header_bytes, separator, value = part.partition(b"\r\n\r\n")
+        if not separator:
+            continue
+        part_headers = {}
+        for raw_line in header_bytes.decode("utf-8", "ignore").split("\r\n"):
+            key, _, header_value = raw_line.partition(":")
+            if key:
+                part_headers[key.strip().lower()] = header_value.strip()
+        disposition = parse_content_disposition(part_headers.get("content-disposition", ""))
+        name = disposition.get("name")
+        if not name:
+            continue
+        if "filename" in disposition:
+            files[name] = {
+                "filename": disposition.get("filename", ""),
+                "content_type": part_headers.get("content-type", ""),
+                "content": value.rstrip(b"\r\n"),
+            }
+        else:
+            fields[name] = value.decode("utf-8", "ignore").strip()
+    return fields, files
+
+
+def estimate_pdf_page_count(pdf_bytes):
+    matches = re.findall(rb"/Type\s*/Page\b", pdf_bytes)
+    return max(1, len(matches))
+
+
+def extract_text_with_pypdf(pdf_bytes):
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    pages = []
+    for page in reader.pages:
+        pages.append(page.extract_text() or "")
+    return normalize_extracted_text("\n\n".join(pages)), len(reader.pages)
+
+
+def decode_pdf_literal(value):
+    output = []
+    i = 0
+    while i < len(value):
+        char = value[i]
+        if char != "\\":
+            output.append(char)
+            i += 1
+            continue
+        i += 1
+        if i >= len(value):
+            break
+        escaped = value[i]
+        mapping = {"n": "\n", "r": "\r", "t": "\t", "b": "\b", "f": "\f", "\\": "\\", "(": "(", ")": ")"}
+        if escaped in mapping:
+            output.append(mapping[escaped])
+            i += 1
+        elif escaped in "01234567":
+            digits = escaped
+            i += 1
+            for _ in range(2):
+                if i < len(value) and value[i] in "01234567":
+                    digits += value[i]
+                    i += 1
+            output.append(chr(int(digits, 8)))
+        else:
+            output.append(escaped)
+            i += 1
+    return "".join(output)
+
+
+def fallback_pdf_text(pdf_bytes):
+    chunks = []
+    raw_streams = re.findall(rb"stream\r?\n(.*?)\r?\nendstream", pdf_bytes, flags=re.S)
+    candidates = [pdf_bytes]
+    for stream in raw_streams:
+        try:
+            candidates.append(zlib.decompress(stream.strip()))
+        except Exception:
+            candidates.append(stream)
+    for candidate in candidates:
+        text = candidate.decode("latin-1", "ignore")
+        for literal in re.findall(r"\((?:\\.|[^\\()]){2,}\)", text):
+            decoded = decode_pdf_literal(literal[1:-1])
+            if re.search(r"[A-Za-z가-힣0-9]", decoded):
+                chunks.append(decoded)
+        for hex_text in re.findall(r"<([0-9A-Fa-f\s]{8,})>", text):
+            compact = re.sub(r"\s+", "", hex_text)
+            try:
+                decoded = bytes.fromhex(compact).decode("utf-16-be", "ignore")
+            except Exception:
+                continue
+            if re.search(r"[A-Za-z가-힣0-9]", decoded):
+                chunks.append(decoded)
+    unique_chunks = []
+    seen = set()
+    for chunk in chunks:
+        key = chunk.strip()
+        if key and key not in seen:
+            seen.add(key)
+            unique_chunks.append(chunk)
+    return normalize_extracted_text("\n".join(unique_chunks))
+
+
+def extract_pdf_text(pdf_bytes):
+    try:
+        text, page_count = extract_text_with_pypdf(pdf_bytes)
+        if text:
+            return {
+                "text": text,
+                "page_count": page_count,
+                "extractor": "pypdf",
+            }
+    except Exception:
+        pass
+    text = fallback_pdf_text(pdf_bytes)
+    return {
+        "text": text,
+        "page_count": estimate_pdf_page_count(pdf_bytes),
+        "extractor": "fallback_pdf_strings",
+    }
+
+
+def extract_response_output_text(response):
+    if response.get("output_text"):
+        return response["output_text"]
+    parts = []
+    for item in response.get("output", []):
+        for content in item.get("content", []):
+            if content.get("type") == "output_text":
+                parts.append(content.get("text", ""))
+    return "\n".join(parts).strip()
+
+
+def parse_json_object(text):
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            return json.loads(text[start:end + 1])
+        raise
+
+
+def openai_error_message(error):
+    body = error.read().decode("utf-8", "ignore")
+    try:
+        payload = json.loads(body)
+        return clean_text((payload.get("error") or {}).get("message") or body)
+    except Exception:
+        return clean_text(body)
+
+
+def call_openai_profile_analysis(extracted_text, document_type, source_document):
+    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("CHATGPT_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured on the server")
+
+    model = os.environ.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL)
+    text_for_ai = extracted_text[:MAX_OPENAI_TEXT_CHARS]
+    prompt = {
+        "document_type": document_type,
+        "source_document": source_document,
+        "extracted_text": text_for_ai,
+    }
+    payload = {
+        "model": model,
+        "instructions": PROFILE_ANALYSIS_PROMPT,
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "다음 PDF 추출 텍스트를 분석해 JSON으로 변환하세요.\n\n" + json.dumps(prompt, ensure_ascii=False),
+                    }
+                ],
+            }
+        ],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "resume_portfolio_profile",
+                "schema": PROFILE_ANALYSIS_SCHEMA,
+                "strict": True,
+            }
+        },
+        "store": False,
+        "temperature": 0.2,
+        "max_output_tokens": 7000,
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        OPENAI_RESPONSES_URL,
+        data=data,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=90) as res:
+            response = json.loads(res.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"OpenAI API error {exc.code}: {openai_error_message(exc)}")
+    output_text = extract_response_output_text(response)
+    if not output_text:
+        raise RuntimeError("OpenAI API returned an empty analysis")
+    parsed = parse_json_object(output_text)
+    return parsed, model
+
+
+def build_profile_text_from_analysis(result):
+    profile = result.get("candidate_profile") or {}
+    matching = result.get("matching_profile") or {}
+    analysis = result.get("ai_analysis_result") or {}
+    technical = [
+        skill.get("name", "")
+        for skill in ((profile.get("skills") or {}).get("technical_skills") or [])
+        if skill.get("name")
+    ]
+    projects = [
+        item.get("name", "")
+        for item in profile.get("projects", [])
+        if item.get("name")
+    ]
+    return {
+        "resume": "\n".join(filter(None, [profile.get("headline", ""), profile.get("summary", ""), analysis.get("overall_summary", "")])),
+        "portfolio": ", ".join(projects),
+        "skills": ", ".join((matching.get("core_keywords") or []) + technical),
+        "preferences": ", ".join((matching.get("preferred_work_style") or {}).get("location") or []),
+        "aiProfileJson": result,
+    }
+
+
+def wrap_profile_analysis_result(ai_result, source_document, model):
+    return {
+        "schema_version": "resume_portfolio_profile.v1",
+        "user_id": "local-user",
+        "generated_at": iso_now(),
+        "source_documents": [source_document],
+        "candidate_profile": ai_result.get("candidate_profile", {}),
+        "matching_profile": ai_result.get("matching_profile", {}),
+        "ai_analysis_result": ai_result.get("ai_analysis_result", {}),
+        "model": model,
+    }
+
+
+def ensure_profile_analysis_payload(state):
+    analysis = state.setdefault("profileAnalysis", dict(DEFAULT_PROFILE_ANALYSIS))
+    for key, value in DEFAULT_PROFILE_ANALYSIS.items():
+        analysis.setdefault(key, value)
+    return analysis
+
+
+def analyze_profile_pdf_upload(headers, body, state):
+    analysis = ensure_profile_analysis_payload(state)
+    if analysis.get("locked") or int(analysis.get("attempts") or 0) >= 1:
+        return {
+            "ok": False,
+            "error": "AI profile analysis is locked after one attempt",
+            "analysis": analysis,
+            "profile": state.get("profile", {}),
+        }, 429
+
+    fields, files = read_multipart_form(headers, body)
+    upload = files.get("document")
+    if not upload:
+        raise ValueError("PDF file is required")
+
+    filename = os.path.basename(upload.get("filename") or "")
+    document_type = clean_text(fields.get("documentType") or "resume_portfolio")
+    content_type = upload.get("content_type") or ""
+    pdf_bytes = upload.get("content") or b""
+    if len(pdf_bytes) > MAX_UPLOAD_BYTES:
+        raise ValueError("PDF file is too large")
+    if not filename.lower().endswith(".pdf"):
+        raise ValueError("Only .pdf files are supported")
+    if content_type and "pdf" not in content_type.lower() and content_type.lower() != "application/octet-stream":
+        raise ValueError("Only PDF uploads are supported")
+    if not pdf_bytes.startswith(b"%PDF-"):
+        raise ValueError("Uploaded file is not a valid PDF")
+
+    extracted = extract_pdf_text(pdf_bytes)
+    extracted_text = extracted.get("text", "")
+    if not extracted_text:
+        raise ValueError("No selectable text was found in this PDF")
+
+    source_document = {
+        "document_id": f"profile_pdf_{int(time.time())}",
+        "document_type": document_type,
+        "original_file_name": filename,
+        "file_format": "pdf",
+        "mime_type": content_type or "application/pdf",
+        "page_count": extracted.get("page_count") or estimate_pdf_page_count(pdf_bytes),
+        "text_extractor": extracted.get("extractor") or "unknown",
+        "extracted_text_char_count": len(extracted_text),
+        "sent_to_ai_char_count": min(len(extracted_text), MAX_OPENAI_TEXT_CHARS),
+        "truncated_for_ai": len(extracted_text) > MAX_OPENAI_TEXT_CHARS,
+        "language": ["ko", "en"],
+        "parse_status": "success",
+    }
+
+    analysis.update({
+        "status": "running",
+        "attempts": int(analysis.get("attempts") or 0) + 1,
+        "locked": True,
+        "lastError": "",
+        "sourceDocument": source_document,
+        "result": None,
+        "model": os.environ.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL),
+        "attemptedAt": iso_now(),
+        "completedAt": "",
+    })
+    write_state(state)
+
+    try:
+        ai_result, model = call_openai_profile_analysis(extracted_text, document_type, source_document)
+        result = wrap_profile_analysis_result(ai_result, source_document, model)
+    except Exception as exc:
+        state = read_state()
+        analysis = ensure_profile_analysis_payload(state)
+        analysis.update({
+            "status": "failed",
+            "locked": True,
+            "lastError": str(exc),
+            "completedAt": iso_now(),
+        })
+        write_state(state)
+        raise
+
+    state = read_state()
+    analysis = ensure_profile_analysis_payload(state)
+    state.setdefault("profile", {}).update(build_profile_text_from_analysis(result))
+    analysis.update({
+        "status": "completed",
+        "locked": True,
+        "lastError": "",
+        "sourceDocument": source_document,
+        "result": result,
+        "model": model,
+        "completedAt": iso_now(),
+    })
+    write_state(state)
+    return {
+        "ok": True,
+        "analysis": analysis,
+        "profile": state.get("profile", {}),
+    }, 200
 
 
 def extract_json_array_at(text, start):
@@ -615,7 +1401,7 @@ def build_docs_payload():
             "dataPath": STATE_PATH,
             "roleCatalogPath": ROLE_CATALOG_PATH,
             "externalShare": "ngrok http 5174",
-            "aiProvider": "not used; local keyword parsing only",
+            "aiProvider": "OpenAI Responses API for one-time PDF profile analysis",
         },
         "features": [
             {"name": "JobKorea 공고 수집", "status": "implemented", "detail": "JobKorea Search HTML 내 Next.js hydration JSON에서 채용공고 content 배열 추출"},
@@ -624,8 +1410,8 @@ def build_docs_payload():
             {"name": "이모지 공고 분류", "status": "implemented", "detail": "👀 관심 있음, ⭐ 지원 후보, ❌ 패스, 💰 연봉 좋음"},
             {"name": "웹 공고 URL 파싱", "status": "implemented", "detail": "URL fetch 후 title, 기간, 경력, 지역, 키워드, 상세 문단 추론"},
             {"name": "공고별 DM 노트", "status": "implemented", "detail": "공고 DM/스레드 reply로 자소서 초안 및 메모 저장"},
-            {"name": "이력서/포트폴리오 저장", "status": "implemented", "detail": "Resume & Portfolio DM에서 local profile 저장"},
-            {"name": "로컬 매칭 패널", "status": "implemented", "detail": "GPT API Key와 로컬 Codex 없이 프로필/공고 키워드 기반 매칭"},
+            {"name": "PDF 이력서/포트폴리오 분석", "status": "implemented", "detail": "Resume & Portfolio DM에서 PDF만 업로드하고 OpenAI Responses API로 구조화 JSON 생성"},
+            {"name": "로컬 매칭 패널", "status": "implemented", "detail": "PDF 분석 JSON의 키워드와 공고 정보를 기반으로 로컬 매칭"},
             {"name": "톤 조절", "status": "implemented", "detail": "raw, business, friendly 3단계 슬라이더"},
             {"name": "자연어 검색 DM", "status": "implemented", "detail": "문장에서 핵심 키워드 추출 후 JobKorea 검색"},
             {"name": "검색 봇 DM", "status": "implemented", "detail": "로컬 intent 파서 + JobKorea 크롤링 trace 표시"},
@@ -642,6 +1428,7 @@ def build_docs_payload():
             {"method": "POST", "path": "/api/classify", "description": "공고 이모지 분류 저장"},
             {"method": "POST", "path": "/api/note", "description": "공고별 개인 노트 저장"},
             {"method": "POST", "path": "/api/profile", "description": "이력서/포트폴리오/스킬/선호 저장"},
+            {"method": "POST", "path": "/api/profile/analyze-pdf", "description": "PDF 업로드 후 1회 한정 ChatGPT API 분석 JSON 저장"},
             {"method": "POST", "path": "/api/match", "description": "공고와 프로필 매칭 결과 생성"},
             {"method": "POST", "path": "/api/channels", "description": "채널 활성화/비활성화, 사용자 채널 추가/삭제"},
             {"method": "POST", "path": "/api/ai-search", "description": "자연어 입력을 로컬 검색 의도로 해석하고 JobKorea 크롤링"},
@@ -709,6 +1496,8 @@ class Handler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/docs":
                 return self.json(build_docs_payload())
             return self.json({"error": "not found"}, 404)
+        except ValueError as exc:
+            return self.json({"error": str(exc)}, 400)
         except Exception as exc:
             return self.json({"error": str(exc)}, 500)
 
@@ -718,7 +1507,14 @@ class Handler(SimpleHTTPRequestHandler):
             return super().do_POST()
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            body = self.rfile.read(length).decode("utf-8")
+            if length > MAX_UPLOAD_BYTES + 2048:
+                return self.json({"error": "request body is too large"}, 413)
+            raw_body = self.rfile.read(length)
+            if parsed.path == "/api/profile/analyze-pdf":
+                state = read_state()
+                payload, status = analyze_profile_pdf_upload(self.headers, raw_body, state)
+                return self.json(payload, status)
+            body = raw_body.decode("utf-8")
             payload = json.loads(body or "{}")
             state = read_state()
             if parsed.path == "/api/classify":
@@ -759,6 +1555,8 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.json({"error": "message is required"}, 400)
                 return self.json(local_recruiter_search(message))
             return self.json({"error": "not found"}, 404)
+        except ValueError as exc:
+            return self.json({"error": str(exc)}, 400)
         except Exception as exc:
             return self.json({"error": str(exc)}, 500)
 

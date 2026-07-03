@@ -19,6 +19,10 @@ const state = {
   classifications: {},
   notes: {},
   profile: {},
+  profileAnalysis: {},
+  profileUploading: false,
+  profileUploadError: "",
+  profileSelectedFileName: "",
   selectedJob: null,
   tone: "business",
   loading: false,
@@ -54,6 +58,17 @@ function api(path, options = {}) {
   return fetch(`${API}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...options,
+  }).then(async (res) => {
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "API failed");
+    return data;
+  });
+}
+
+function uploadApi(path, body) {
+  return fetch(`${API}${path}`, {
+    method: "POST",
+    body,
   }).then(async (res) => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "API failed");
@@ -162,6 +177,7 @@ async function loadState() {
   state.classifications = data.classifications || {};
   state.notes = data.notes || {};
   state.profile = data.profile || {};
+  state.profileAnalysis = data.profileAnalysis || {};
   state.jobs.direct = data.directParsedJobs || [];
 }
 
@@ -385,20 +401,98 @@ function renderAiSearchDm() {
 
 function renderProfileDm() {
   channelTitle.textContent = "Resume & Portfolio";
-  channelSubtitle.textContent = "이력서/포트폴리오를 저장하면 공고 스레드의 로컬 매칭에 반영됩니다.";
+  channelSubtitle.textContent = "PDF 업로드 → 텍스트 추출 → ChatGPT API 분석 → JSON 저장";
   memberCount.textContent = "me";
-  bookmarks.innerHTML = `<button class="bookmark">profile memory</button><button class="bookmark">matching source</button>`;
-  messageInput.placeholder = "예: skills: React, Swift, PM";
-  messageList.innerHTML = `
-    <section class="profile-editor">
-      <label>이력서 요약<textarea id="resumeInput">${escapeHtml(state.profile.resume || "")}</textarea></label>
-      <label>포트폴리오/프로젝트<textarea id="portfolioInput">${escapeHtml(state.profile.portfolio || "")}</textarea></label>
-      <label>핵심 스킬<input id="skillsInput" value="${escapeHtml(state.profile.skills || "")}" /></label>
-      <label>선호 조건<input id="preferencesInput" value="${escapeHtml(state.profile.preferences || "")}" /></label>
-      <button id="saveProfile">Save profile</button>
-    </section>
-  `;
+  bookmarks.innerHTML = `<button class="bookmark">PDF only</button><button class="bookmark">one AI run</button><button class="bookmark">JSON output</button>`;
+  messageInput.placeholder = "PDF 업로드는 위 패널에서만 가능합니다.";
+  messageList.innerHTML = renderProfileUploadSurface();
   renderProfileThread();
+}
+
+function renderProfileUploadSurface() {
+  const analysis = state.profileAnalysis || {};
+  const result = analysis.result;
+  const locked = analysis.locked || Number(analysis.attempts || 0) >= 1;
+  const uploadDisabled = locked || state.profileUploading;
+  const statusLabel = profileAnalysisStatusLabel(analysis);
+  return `
+    <section class="channel-intro profile-intro">
+      <div class="intro-icon">PDF</div>
+      <h2>Resume & Portfolio</h2>
+      <p>이력서와 포트폴리오는 PDF 파일만 받습니다. 분석이 끝나면 저장된 사용자 프로필 JSON을 그대로 표시합니다.</p>
+      <div class="intro-meta">
+        <span>${escapeHtml(statusLabel)}</span>
+        <span>${analysis.attempts || 0}/1 AI call</span>
+        <span>${locked ? "locked" : "ready"}</span>
+      </div>
+    </section>
+
+    <article class="message">
+      <div class="message-avatar" style="background:#1264a3">RP</div>
+      <div class="message-content">
+        <div class="message-meta">
+          <span class="message-name">Resume & Portfolio</span>
+          <span class="message-time">${escapeHtml(statusLabel)}</span>
+        </div>
+        <form class="profile-upload-form ${uploadDisabled ? "disabled" : ""}" id="profileUploadForm">
+          <div class="document-type-row">
+            <label>문서 유형
+              <select id="profileDocumentType" ${uploadDisabled ? "disabled" : ""}>
+                <option value="resume_portfolio">이력서 + 포트폴리오</option>
+                <option value="resume">이력서</option>
+                <option value="portfolio">포트폴리오</option>
+              </select>
+            </label>
+          </div>
+          <label class="pdf-dropzone ${state.profileSelectedFileName ? "has-file" : ""}">
+            <input id="profilePdfInput" type="file" accept="application/pdf,.pdf" ${uploadDisabled ? "disabled" : ""} />
+            <span class="pdf-icon">PDF</span>
+            <strong>${escapeHtml(state.profileSelectedFileName || "PDF 파일 선택")}</strong>
+            <small>${locked ? "AI 분석은 이미 1회 사용되었습니다." : "application/pdf"}</small>
+          </label>
+          ${state.profileUploadError ? `<p class="profile-upload-error">${escapeHtml(state.profileUploadError)}</p>` : ""}
+          ${analysis.lastError && analysis.status === "failed" ? `<p class="profile-upload-error">${escapeHtml(analysis.lastError)}</p>` : ""}
+          <button type="submit" ${uploadDisabled ? "disabled" : ""}>${state.profileUploading ? "분석 중" : "AI 분석 시작"}</button>
+        </form>
+      </div>
+    </article>
+
+    ${result ? renderProfileAnalysisResult(result) : emptyBlock(locked ? "AI 분석 시도 기록이 있습니다." : "아직 업로드된 PDF가 없습니다.")}
+  `;
+}
+
+function profileAnalysisStatusLabel(analysis = {}) {
+  if (state.profileUploading || analysis.status === "running") return "분석 중";
+  if (analysis.status === "completed") return "분석 완료";
+  if (analysis.status === "failed") return "분석 실패";
+  return "분석 대기";
+}
+
+function renderProfileAnalysisResult(result) {
+  const display = result.ai_analysis_result?.chat_display_message || {};
+  return `
+    <article class="message profile-result-message">
+      <div class="message-avatar" style="background:#007a5a">AI</div>
+      <div class="message-content">
+        <div class="message-meta">
+          <span class="message-name">${escapeHtml(display.title || "PDF 분석이 완료되었습니다.")}</span>
+          <span class="message-time">${escapeHtml(result.generated_at || "")}</span>
+        </div>
+        <div class="message-text">${escapeHtml(display.summary || result.ai_analysis_result?.overall_summary || "")}</div>
+        ${display.bullets?.length ? `<ul class="profile-result-bullets">${display.bullets.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+        <section class="json-output-card">
+          <div class="json-card-head">
+            <div>
+              <span class="job-source">candidate_profile JSON</span>
+              <h3>${escapeHtml(result.candidate_profile?.headline || "AI 분석 결과")}</h3>
+            </div>
+            <span class="job-dday">${escapeHtml(result.model || "OpenAI")}</span>
+          </div>
+          <pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>
+        </section>
+      </div>
+    </article>
+  `;
 }
 
 function renderSearchDm() {
@@ -472,10 +566,23 @@ async function renderThread(job) {
 }
 
 function renderProfileThread() {
+  const analysis = state.profileAnalysis || {};
+  const result = analysis.result || {};
+  const message = result.ai_analysis_result?.chat_display_message || {};
+  const keywords = result.matching_profile?.core_keywords || [];
   threadChannel.textContent = "# profile";
   threadBody.innerHTML = `
-    <div class="thread-context"><span>사용처</span><strong>공고 매칭</strong></div>
-    <div class="empty-thread">프로필 DM에 저장된 이력서/포트폴리오는 오른쪽 로컬 매칭 점수와 추천 이유에 사용됩니다.</div>
+    <div class="thread-context"><span>상태</span><strong>${escapeHtml(profileAnalysisStatusLabel(analysis))}</strong></div>
+    ${result.schema_version ? `
+      <section class="profile-thread-summary">
+        <strong>${escapeHtml(message.title || "AI 분석 결과")}</strong>
+        <p>${escapeHtml(message.summary || result.ai_analysis_result?.overall_summary || "")}</p>
+        <div class="thread-keywords">${keywords.slice(0, 8).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>
+      </section>
+      <div class="empty-thread">이 JSON은 공고 스레드의 로컬 매칭 키워드에도 반영됩니다.</div>
+    ` : `
+      <div class="empty-thread">${analysis.status === "failed" ? escapeHtml(analysis.lastError || "분석 실패") : "PDF 분석 결과가 여기에 표시됩니다."}</div>
+    `}
   `;
 }
 
@@ -627,16 +734,7 @@ async function submitComposer(text) {
   }
 
   if (state.activeMode === "dm" && state.activeDm === "profile") {
-    const next = { ...state.profile };
-    if (text.includes(":")) {
-      const [key, ...rest] = text.split(":");
-      next[key.trim()] = rest.join(":").trim();
-    } else {
-      next.resume = `${next.resume || ""}\n${text}`.trim();
-    }
-    const data = await api("/api/profile", { method: "POST", body: JSON.stringify({ profile: next }) });
-    state.profile = data.profile;
-    render();
+    alert("Resume & Portfolio DM은 PDF 업로드만 지원합니다.");
   }
 }
 
@@ -805,6 +903,47 @@ document.addEventListener("input", (event) => {
   }
   if (event.target.id === "channelFilter") {
     renderChannelManager();
+  }
+  if (event.target.id === "profilePdfInput") {
+    const file = event.target.files?.[0];
+    state.profileSelectedFileName = file?.name || "";
+    const dropzone = event.target.closest(".pdf-dropzone");
+    if (dropzone) {
+      dropzone.classList.toggle("has-file", Boolean(file));
+      const label = dropzone.querySelector("strong");
+      if (label) label.textContent = state.profileSelectedFileName || "PDF 파일 선택";
+    }
+  }
+});
+
+document.addEventListener("submit", async (event) => {
+  if (event.target.id !== "profileUploadForm") return;
+  event.preventDefault();
+  const input = document.querySelector("#profilePdfInput");
+  const documentType = document.querySelector("#profileDocumentType")?.value || "resume_portfolio";
+  const file = input?.files?.[0];
+  if (!file) return alert("PDF 파일을 선택해 주세요.");
+  const fileType = (file.type || "").toLowerCase();
+  if (!file.name.toLowerCase().endsWith(".pdf") || (fileType && !["application/pdf", "application/octet-stream"].includes(fileType))) {
+    return alert("PDF 파일만 업로드할 수 있습니다.");
+  }
+
+  const form = new FormData();
+  form.append("document", file);
+  form.append("documentType", documentType);
+  state.profileUploading = true;
+  state.profileUploadError = "";
+  render();
+  try {
+    const data = await uploadApi("/api/profile/analyze-pdf", form);
+    state.profileAnalysis = data.analysis || {};
+    state.profile = data.profile || state.profile;
+    state.profileSelectedFileName = "";
+  } catch (err) {
+    state.profileUploadError = err.message;
+  } finally {
+    state.profileUploading = false;
+    render();
   }
 });
 
