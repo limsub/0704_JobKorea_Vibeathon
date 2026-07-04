@@ -522,6 +522,7 @@ function renderLaterSidebarRows() {
 }
 
 function renderRailState() {
+  appShell.classList.toggle("later-mode", state.activeMode === "later");
   document.querySelectorAll("[data-rail-home]").forEach((button) => {
     button.classList.toggle("active", state.activeMode === "channel");
     button.setAttribute("aria-pressed", String(state.activeMode === "channel"));
@@ -586,23 +587,27 @@ function renderLater() {
   channelTitle.textContent = "나중에 보기";
   channelSubtitle.textContent = "이모지로 저장한 공고를 태그별로 모아봅니다.";
   memberCount.textContent = total;
-  bookmarks.innerHTML = groups.map((group) => `
-    <button class="bookmark ${group.reaction.key === activeGroup.reaction.key ? "active" : ""}" data-later-reaction="${group.reaction.key}">
-      ${group.reaction.emoji} ${escapeHtml(group.reaction.label)} ${group.jobs.length}
-    </button>
-  `).join("");
+  bookmarks.innerHTML = "";
   messageInput.placeholder = "저장한 공고의 스레드에서 메모를 남길 수 있습니다.";
 
   messageList.innerHTML = `
-    <section class="channel-intro later-intro">
-      <div class="intro-icon">☆</div>
-      <h2>나중에 보기</h2>
-      <p>공고 메시지에 찍은 이모지가 저장 태그가 되어 이곳에 분류됩니다.</p>
-      <div class="later-category-grid">
-        ${groups.map((group) => renderLaterCategoryButton(group, activeGroup.reaction.key)).join("")}
+    <section class="later-board">
+      <header class="later-board-header">
+        <div>
+          <h2>나중에</h2>
+          <nav class="later-tabs" aria-label="나중에 보기 분류">
+            ${groups.map((group) => renderLaterTab(group, activeGroup.reaction.key)).join("")}
+          </nav>
+        </div>
+        <div class="later-board-actions">
+          <button type="button" title="필터">≡</button>
+          <button type="button" title="추가">＋</button>
+        </div>
+      </header>
+      <div class="later-list">
+        ${activeGroup.jobs.length ? activeGroup.jobs.map((job) => renderLaterListItem(job, activeGroup.reaction)).join("") : renderLaterEmpty(activeGroup.reaction)}
       </div>
     </section>
-    ${renderLaterGroup(activeGroup)}
   `;
   scrollToTop(messageList);
 }
@@ -633,6 +638,16 @@ function renderLaterGroup(group) {
   `;
 }
 
+function renderLaterTab(group, activeReactionKey) {
+  return `
+    <button type="button" class="later-tab ${group.reaction.key === activeReactionKey ? "active" : ""}" data-later-reaction="${group.reaction.key}">
+      <span>${group.reaction.emoji}</span>
+      <strong>${escapeHtml(group.reaction.label)}</strong>
+      <small>${group.jobs.length}</small>
+    </button>
+  `;
+}
+
 function renderLaterCategoryButton(group, activeReactionKey) {
   return `
     <button class="later-category-button ${group.reaction.key === activeReactionKey ? "active" : ""}" data-later-reaction="${group.reaction.key}">
@@ -640,6 +655,45 @@ function renderLaterCategoryButton(group, activeReactionKey) {
       <strong>${escapeHtml(group.reaction.label)}</strong>
       <small>${group.jobs.length}개 공고</small>
     </button>
+  `;
+}
+
+function renderLaterListItem(job, reaction) {
+  const jobId = String(job.id);
+  const company = jobCompany(job);
+  const keywords = jobKeywords(job).slice(0, 3);
+  return `
+    <article class="later-list-item" data-job="${escapeHtml(jobId)}" tabindex="0" aria-label="${escapeHtml(company)} 공고 스레드 열기">
+      <div class="later-list-source">${reaction.emoji} ${escapeHtml(jobSource(job))}</div>
+      <button class="later-list-avatar" style="background:${colorFor(company)}" data-open-dm="${escapeHtml(jobId)}">${initials(company)}</button>
+      <div class="later-list-main">
+        <div class="later-list-title">
+          <strong>${escapeHtml(company)}</strong>
+          <span>${escapeHtml(jobTitle(job))}</span>
+        </div>
+        <p>${escapeHtml(jobMessageText(job))}</p>
+        <div class="later-list-meta">
+          <span>${escapeHtml(jobCareer(job))}</span>
+          <span>${escapeHtml(jobLocation(job))}</span>
+          ${keywords.map((keyword) => `<span>${escapeHtml(keyword)}</span>`).join("")}
+        </div>
+      </div>
+      <div class="later-list-actions">
+        <button type="button" title="스레드" data-thread-job="${escapeHtml(jobId)}">◷</button>
+        <button type="button" title="원문 열기" data-open-url="${escapeHtml(jobUrl(job))}">↗</button>
+        <button type="button" title="더 보기">⋮</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderLaterEmpty(reaction) {
+  return `
+    <div class="later-empty">
+      <span>${reaction.emoji}</span>
+      <strong>${escapeHtml(reaction.label)}</strong>
+      <p>이 이모지로 저장한 공고가 없습니다.</p>
+    </div>
   `;
 }
 
