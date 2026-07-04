@@ -478,6 +478,7 @@ SLACK_JOB_MESSAGE_PROMPT = """
 - thread_comment는 스레드 첫 코멘트로, 짧은 해석 문단 + 핵심 항목 bullet + 확인 필요 사항 + 한 줄 결론 순서로 쓴다.
 - 사용자가 준 예시처럼 너무 딱딱한 공고 요약이 아니라 동료에게 레퍼런스를 공유하는 톤으로 쓴다.
 - 공고마다 문장 시작, 길이, 이모지, 말투를 다르게 쓴다. 같은 템플릿을 반복하지 않는다.
+- 톤은 팀 리드의 업무 공유, 후배의 가벼운 제보, 대표의 전체 공지, 실무자의 짧은 체크, 길게 해석한 메모처럼 후보군이 충분히 달라야 한다.
 - "채용공고 안내"처럼 공고문 말투를 피하고, 실제 Slack에서 동료에게 공유하는 메모처럼 쓴다.
 - 이모지는 :eyes:, :memo:, :bulb:, :mag:, :sparkles: 중 상황에 맞게 0~2개만 쓴다.
 - key_points는 역할 성격, 주요 키워드, 산업군, 경험 기준, 확인 기한, 급여/위치 중 중요한 것만 4~7개로 쓴다.
@@ -1491,30 +1492,171 @@ def local_slack_message(job, error=""):
     period = clean_text(raw.get("period")) or clean_text(profile.get("deadline")) or "마감일 확인 필요"
     seed = f"{company}|{title}|{period}|{keyword_text}"
     emoji = stable_pick(seed, [":eyes:", ":memo:", ":bulb:", ":mag:", ":sparkles:", ""])
-    opener = stable_pick(seed + "opener", [
-        f"{company} 쪽에서 눈에 들어온 역할 하나 공유해요{(' ' + emoji) if emoji else ''}",
-        f"요 건은 {company} / {title} 흐름이라 한번 봐도 좋겠어요{(' ' + emoji) if emoji else ''}",
-        f"{company}에서 나온 역할인데, 팀에서 참고할 만한 포인트가 보여요.",
-        f"가볍게 체크해볼 만한 {company} 건 하나 가져왔어요{(' ' + emoji) if emoji else ''}",
-    ])
-    angle = stable_pick(seed + "angle", [
-        f"{keyword_text} 쪽 키워드가 같이 묶여 있어서, 역할 범위가 꽤 선명한 편이에요.",
-        f"핵심은 {keyword_text} 쪽으로 보이고, 실제 업무 맥락은 원문에서 한 번 더 보면 좋겠습니다.",
-        f"표면상으로는 {title}이지만, 키워드를 보면 {keyword_text} 경험을 엮어볼 여지가 있어요.",
-        f"{career} 기준이라 바로 실무에 들어갈 수 있는 분들 중심으로 보는 건 같아요.",
-    ])
-    close = stable_pick(seed + "close", [
-        "세부 내용은 스레드에 짧게 정리해둘게요.",
-        "궁금한 분들은 스레드에 적어둔 체크포인트부터 보면 됩니다.",
-        "일단 놓치지 않게 공유하고, 디테일은 스레드로 넘겨둘게요.",
-        "지원 여부 판단할 때 볼 부분만 스레드에 추려놨어요.",
-    ])
-    message_body = "\n\n".join([
-        opener,
-        angle,
-        f"위치는 {location}, 일정은 {period} 기준으로 보입니다.",
-        close,
-    ])
+    primary_keyword = keyword_text.split(",")[0].strip() or "직무"
+    message_variants = [
+        {
+            "title": f"{company} 쪽 참고할 만한 흐름",
+            "body": "\n\n".join([
+                f"{company} 쪽에서 눈에 들어온 역할 하나 공유해요{(' ' + emoji) if emoji else ''}",
+                f"{keyword_text} 쪽 키워드가 같이 묶여 있어서, 관련 업무 보시는 분들은 레퍼런스로 봐도 좋겠습니다.",
+                f"조건은 {career}, 일정은 {period} 기준이에요. 자세한 건 스레드에 남겨둘게요.",
+            ]),
+        },
+        {
+            "title": f"{primary_keyword} 쪽 짧은 메모",
+            "body": "\n\n".join([
+                f"짧게만 공유합니다. {company}에서 {primary_keyword} 축 역할이 하나 보입니다.",
+                f"길게 볼 건 아니고, {keyword_text} 경험 있는 분들이 원문만 빠르게 확인하면 될 것 같아요.",
+            ]),
+        },
+        {
+            "title": f"{company} 건, 우선 체크",
+            "body": "\n\n".join([
+                "이건 우선순위 조금 높게 봐도 좋겠습니다.",
+                f"{company} / {title} 흐름이고, 키워드는 {keyword_text} 쪽으로 잡혀 있어요.",
+                f"{career} 기준이라 바로 실무 얘기 가능한 분들에게 더 맞을 듯합니다. 스레드에 판단 포인트만 정리해둘게요.",
+            ]),
+        },
+        {
+            "title": "전사 참고용 레퍼런스",
+            "body": "\n\n".join([
+                "전사 참고용으로 하나 공유드립니다.",
+                f"{company}에서 {primary_keyword} 관련 역할을 보고 있고, 시장에서 어떤 역량을 같이 묶는지 보기 좋습니다.",
+                f"지원 여부와 별개로 {keyword_text} 조합은 한 번 체크해보시면 좋겠습니다.",
+            ]),
+        },
+        {
+            "title": f"{company} 레퍼런스 하나",
+            "body": "\n\n".join([
+                f"요거 봤는데 {company} 쪽 역할 정의가 꽤 선명해 보여요.",
+                f"특히 {primary_keyword} 쪽을 중심으로, {keyword_text} 경험을 같이 보는 느낌입니다.",
+                f"위치/처우는 원문 확인 필요하고, 마감 흐름은 {period}로 보입니다.",
+            ]),
+        },
+        {
+            "title": f"{primary_keyword} 보는 분들만",
+            "body": "\n\n".join([
+                f"{primary_keyword} 보시는 분들만 가볍게 확인해 주세요.",
+                f"{company} 건이고, {career} 기준입니다.",
+                "스레드에 핵심만 적어놨습니다 :memo:",
+            ]),
+        },
+        {
+            "title": f"{company} / 업무 범위 체크",
+            "body": "\n\n".join([
+                f"팀장님들께 공유드립니다. {company} 쪽에서 {title} 역할이 올라와 있습니다.",
+                f"업무 범위는 {keyword_text} 근처로 보이고, 후보자 풀이 있다면 내부에서 한 번 매칭해볼 만합니다.",
+                f"기한은 {period}, 위치는 {location} 기준입니다.",
+            ]),
+        },
+        {
+            "title": "가볍게 던져두는 건",
+            "body": "\n\n".join([
+                "저 이거 보다가 괜찮아 보여서 던져둡니다.",
+                f"{company}이고요, {keyword_text} 쪽이 같이 보여요.",
+                f"완전 찰떡인지는 원문 봐야 하는데, {career} 조건 괜찮은 분들은 한 번 보면 좋을 듯해요 {emoji}".strip(),
+            ]),
+        },
+        {
+            "title": f"{company} 시장 신호",
+            "body": "\n\n".join([
+                f"{company} 건은 지원용이라기보다 시장 신호로도 볼 만합니다.",
+                f"{primary_keyword} 하나만 보는 게 아니라 {keyword_text}를 같이 묶어두고 있어요.",
+                "요즘 비슷한 역할들이 어떤 식으로 포지셔닝되는지 참고하기 좋겠습니다.",
+            ]),
+        },
+        {
+            "title": "오늘 체크 리스트에 추가",
+            "body": "\n\n".join([
+                f"오늘 체크 리스트에 {company} 건 하나 추가해두면 좋겠습니다.",
+                f"역할은 {title} 쪽이고, 핵심 단어는 {keyword_text}입니다.",
+                f"급한 건 아니지만 {period} 일정이라, 관심 있는 분들은 이번 주 안에 원문만 먼저 봐주세요.",
+            ]),
+        },
+        {
+            "title": f"{primary_keyword} 관련 참고",
+            "body": "\n\n".join([
+                f"참고로 {primary_keyword} 관련해서 이런 역할도 나왔습니다.",
+                f"{company}에서 보는 기준은 {career}, 위치는 {location}로 잡혀 있어요.",
+                "내용이 길진 않아서 스레드에 판단용 포인트만 정리했습니다.",
+            ]),
+        },
+        {
+            "title": "대표님 공지 톤으로",
+            "body": "\n\n".join([
+                "전체 공유드립니다.",
+                f"{company}의 {title} 건은 우리가 보는 직무/사업 흐름과 연결해서 참고할 만합니다.",
+                f"특히 {keyword_text} 조합이 보이니, 관련 담당자는 원문을 확인하고 적용 가능한 인사이트가 있는지 봐주세요.",
+            ]),
+        },
+        {
+            "title": f"{company} 건, 길게 보면",
+            "body": "\n\n".join([
+                f"{company} 건은 단순 채용이라기보다 역할 설계를 보는 자료로도 괜찮습니다.",
+                f"공개된 키워드만 보면 {primary_keyword}를 중심으로 {keyword_text}까지 같이 보고 있고요.",
+                f"{career} 기준이라 기대하는 경험치가 어느 정도 있는 편입니다.",
+                "지원 후보가 아니어도, 포트폴리오 문장 만들 때 참고할 만한 구조라 스레드에 남겨둡니다.",
+            ]),
+        },
+        {
+            "title": "이건 짧게 공유",
+            "body": "\n\n".join([
+                f"{company} / {primary_keyword} 쪽입니다.",
+                f"{career}, {period}.",
+                "맞는 분만 스레드 확인해 주세요.",
+            ]),
+        },
+        {
+            "title": f"{company} 업무 흐름 메모",
+            "body": "\n\n".join([
+                f"{company} 쪽 업무 흐름을 보면 {primary_keyword}만 단독으로 보는 건 아닌 듯합니다.",
+                f"{keyword_text}가 같이 있어서, 실행/분석/운영 사이를 오가는 역할일 가능성이 있어요.",
+                "원문 기준으로 더 확인해야 하지만, 방향성은 참고할 만합니다 :bulb:",
+            ]),
+        },
+        {
+            "title": "후보자 추천 관점",
+            "body": "\n\n".join([
+                f"후보자 추천 관점으로 보면 {company} 건은 {career} 쪽이 핵심입니다.",
+                f"{keyword_text} 경험을 말로만 쓴 분보다, 실제 결과물이나 지표가 있는 분이 더 잘 맞을 것 같아요.",
+                f"기한은 {period}라 여유는 많지 않을 수 있습니다.",
+            ]),
+        },
+        {
+            "title": f"{primary_keyword} 쪽 괜찮은 예시",
+            "body": "\n\n".join([
+                f"{primary_keyword} 쪽 포지션 설명 예시로 {company} 건 괜찮아 보여요.",
+                f"회사/산업 맥락은 원문 확인이 필요하지만, 요구하는 키워드는 {keyword_text} 쪽입니다.",
+                "포폴 방향 잡는 분들도 한 번 보면 좋겠습니다.",
+            ]),
+        },
+        {
+            "title": "살짝 눈에 띈 건",
+            "body": "\n\n".join([
+                "살짝 눈에 띈 건이라 공유해요.",
+                f"{company}에서 {title} 역할을 보고 있고, 조건은 {career}로 보입니다.",
+                f"키워드는 {keyword_text}. 관심 있으면 원문 먼저 열어보고, 괜찮으면 스레드 기준으로 판단해보죠.",
+            ]),
+        },
+        {
+            "title": f"{company} 관련 빠른 공유",
+            "body": "\n\n".join([
+                f"빠르게 공유합니다. {company} 쪽에서 {primary_keyword} 관련 역할이 나왔습니다.",
+                f"현재 보이는 정보 기준으로는 {keyword_text} 경험을 같이 보는 듯하고, 위치는 {location}입니다.",
+                "공고문처럼 길게 읽기보다, 우리 쪽 후보/포폴 방향과 맞는지만 먼저 보면 될 것 같습니다.",
+            ]),
+        },
+        {
+            "title": "실무자 관점 체크",
+            "body": "\n\n".join([
+                f"실무자 관점에서 보면 {company} 건은 업무 범위 확인이 먼저입니다.",
+                f"{title}이라고 되어 있지만 실제 판단은 {keyword_text} 쪽 경험을 얼마나 갖고 있느냐가 될 것 같아요.",
+                f"{salary} / {location} / {period}는 원문에서 같이 확인하면 좋겠습니다.",
+            ]),
+        },
+    ]
+    selected_variant = stable_pick(seed + "message-variant-20", message_variants)
+    message_body = selected_variant["body"]
     thread_intro = stable_pick(seed + "thread", [
         f"{company}의 {title} 역할로 보여요.",
         f"이 건은 {title} 중심으로 보면 될 것 같아요.",
@@ -1552,12 +1694,7 @@ def local_slack_message(job, error=""):
         f"기한: {period}",
     ]
     return {
-        "message_title": stable_pick(seed + "title", [
-            f"{company} 쪽 참고할 만한 흐름",
-            f"{company} 건, 키워드가 괜찮아요",
-            f"{keyword_text.split(',')[0]} 쪽 메모",
-            f"{company} 레퍼런스 하나 공유",
-        ]),
+        "message_title": selected_variant["title"],
         "message_body": message_body,
         "thread_comment": thread_comment,
         "thread_summary": f"{company} / {title} / {career}",

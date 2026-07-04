@@ -1,7 +1,7 @@
 const API = "";
 const MAX_PROFILE_PDF_BYTES = 40 * 1024 * 1024;
 const LOCAL_STATE_KEY = "slezzuk_local_state_v1";
-const LOCAL_STATE_VERSION = 3;
+const LOCAL_STATE_VERSION = 4;
 const INITIAL_JOB_BATCH_SIZE = 4;
 const FULL_JOB_BATCH_SIZE = 10;
 const SKELETON_JOB_COUNT = 4;
@@ -253,6 +253,9 @@ function readLocalState() {
         parsed.openedJobDms = {};
       }
       if ((parsed.version || 1) < 3) {
+        parsed.channelJobs = {};
+      }
+      if ((parsed.version || 1) < 4) {
         parsed.channelJobs = {};
       }
       parsed.version = LOCAL_STATE_VERSION;
@@ -1035,12 +1038,6 @@ function renderJobCard(job) {
           <h3>${escapeHtml(jobTitle(job))}</h3>
         </div>
         <span class="job-dday">${escapeHtml(jobCareer(job))}</span>
-      </div>
-      <div class="job-meta-grid">
-        <span><strong>회사</strong>${escapeHtml(jobCompany(job))}</span>
-        <span><strong>지역</strong>${escapeHtml(jobLocation(job))}</span>
-        <span><strong>기간</strong>${escapeHtml(jobPeriod(job))}</span>
-        <span><strong>출처</strong>${escapeHtml(jobSource(job))}</span>
       </div>
       ${keyPoints.length ? `<div class="job-roles">${keyPoints.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
       <div class="job-card-footer">
