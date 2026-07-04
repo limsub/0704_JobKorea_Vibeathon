@@ -32,6 +32,7 @@ OCR_DPI = 160
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 DEFAULT_OPENAI_TIMEOUT = 60
+DEFAULT_OPENAI_JOB_MESSAGE_TIMEOUT = 8
 
 DEFAULT_ENABLED_CHANNEL_IDS = ["pm"]
 
@@ -1401,6 +1402,15 @@ def env_int(name, default):
         return default
 
 
+def openai_job_message_limit():
+    default = 0 if os.environ.get("VERCEL") else 10
+    return max(0, env_int("OPENAI_JOB_MESSAGE_LIMIT", default))
+
+
+def openai_job_message_timeout():
+    return max(1, env_int("OPENAI_JOB_MESSAGE_TIMEOUT", DEFAULT_OPENAI_JOB_MESSAGE_TIMEOUT))
+
+
 def compact_job_for_ai(job):
     raw = job.get("raw") or {}
     profile = job.get("job_profile") or {}
@@ -1521,7 +1531,7 @@ def hydrate_slack_messages(jobs):
     if not jobs:
         return jobs
 
-    limit = env_int("OPENAI_JOB_MESSAGE_LIMIT", 10)
+    limit = openai_job_message_limit()
     pending = []
     for job in jobs:
         key = job_message_cache_key(job)
@@ -1554,7 +1564,7 @@ def hydrate_slack_messages(jobs):
             "job_slack_messages",
             SLACK_JOB_MESSAGE_SCHEMA,
             max_output_tokens=6000,
-            timeout=45,
+            timeout=openai_job_message_timeout(),
         )
         by_id = {
             str(item.get("id", "")): item
