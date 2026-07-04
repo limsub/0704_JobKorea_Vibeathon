@@ -83,8 +83,8 @@ const searchResults = document.querySelector("#searchResults");
 const channelOverlay = document.querySelector("#channelOverlay");
 const channelManager = document.querySelector("#channelManager");
 const channelFilter = document.querySelector("#channelFilter");
+const channelManagerSummary = document.querySelector("#channelManagerSummary");
 const closeChannelManager = document.querySelector("#closeChannelManager");
-const customChannelForm = document.querySelector("#customChannelForm");
 
 async function parseApiResponse(res) {
   const contentType = res.headers.get("Content-Type") || "";
@@ -1046,27 +1046,35 @@ function renderChannelManager() {
   if (!channelManager) return;
   const query = (channelFilter?.value || "").trim().toLowerCase();
   const enabled = new Set(state.enabledChannelIds);
-  const visibleChannels = allLocalChannels().filter((channel) => {
+  const localChannels = allLocalChannels();
+  const visibleChannels = localChannels.filter((channel) => {
     const haystack = `${channel.name} ${channel.query} ${channel.category} ${(channel.bookmarks || []).join(" ")}`.toLowerCase();
     return !query || haystack.includes(query);
   });
+  if (channelManagerSummary) {
+    channelManagerSummary.textContent = `${enabled.size}/${localChannels.length}개 선택됨`;
+  }
 
   channelManager.innerHTML = visibleChannels.map((channel) => {
     const isEnabled = enabled.has(channel.id);
     const isCustom = channel.source === "custom";
+    const bookmarkChips = (channel.bookmarks || []).slice(0, 4).map((item) => `<span>${escapeHtml(item)}</span>`).join("");
     return `
-      <article class="channel-option">
+      <article class="channel-option ${isEnabled ? "selected" : ""}">
         <div class="channel-option-main">
           <span class="channel-hash">#</span>
           <div>
-            <strong>${escapeHtml(channel.name)}</strong>
-            <p>${escapeHtml(channel.subtitle || channel.query)}</p>
-            <small>${escapeHtml(channel.category || "직군")} · ${escapeHtml(channel.query || "")}</small>
+            <div class="channel-option-top">
+              <strong>${escapeHtml(channel.name)}</strong>
+              <small>${escapeHtml(channel.category || "직군")}</small>
+            </div>
+            <p>${escapeHtml(channel.subtitle || `${channel.name} 공고 피드`)}</p>
+            <div class="channel-option-tags">${bookmarkChips}</div>
           </div>
         </div>
         <div class="channel-option-actions">
           <button class="${isEnabled ? "selected" : ""}" data-toggle-channel="${channel.id}" data-enabled="${String(!isEnabled)}">
-            ${isEnabled ? "숨기기" : "표시"}
+            ${isEnabled ? "선택됨" : "선택"}
           </button>
           ${isCustom ? `<button class="danger" data-delete-channel="${channel.id}">삭제</button>` : ""}
         </div>
@@ -1230,16 +1238,6 @@ messageInput.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || event.shiftKey) return;
   event.preventDefault();
   composer.requestSubmit();
-});
-
-customChannelForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = new FormData(customChannelForm);
-  const name = String(form.get("name") || "").trim();
-  const query = String(form.get("query") || "").trim();
-  if (!name || !query) return alert("채널 이름과 검색 키워드를 입력해 주세요.");
-  await mutateChannels({ action: "create", name, query }).catch((err) => alert(err.message));
-  customChannelForm.reset();
 });
 
 threadReply.addEventListener("submit", async (event) => {

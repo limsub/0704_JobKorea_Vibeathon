@@ -1562,7 +1562,7 @@ def build_docs_payload():
         "features": [
             {"name": "JobKorea 공고 수집", "status": "implemented", "detail": "JobKorea Search HTML 내 Next.js hydration JSON에서 채용공고 content 배열 추출"},
             {"name": "공고 JSON 원문 표시", "status": "implemented", "detail": "채널 공고 셀에 JSON_1 형태를 그대로 출력하고 slack_messages는 빈 문자열로 유지"},
-            {"name": "동적 채널 관리", "status": "implemented", "detail": "직군 카탈로그 기반으로 채널 표시/숨김, 사용자 채널 추가/삭제를 브라우저 localStorage에 저장"},
+            {"name": "동적 채널 관리", "status": "implemented", "detail": "직군 카탈로그를 카드 형태로 보여주고 선택한 채널 표시 상태를 브라우저 localStorage에 저장"},
             {"name": "이모지 공고 분류", "status": "implemented", "detail": "👀 관심 있음, ⭐ 지원 후보, ❌ 패스, 💰 연봉 좋음"},
             {"name": "웹 공고 URL 파싱", "status": "implemented", "detail": "URL fetch 후 title, 기간, 경력, 지역, 키워드, 상세 문단 추론. 저장은 브라우저 localStorage"},
             {"name": "공고별 DM 노트", "status": "implemented", "detail": "공고 DM/스레드 reply로 자소서 초안 및 메모를 브라우저 localStorage에 저장"},
