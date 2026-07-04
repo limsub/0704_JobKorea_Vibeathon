@@ -57,7 +57,6 @@ const state = {
   profileUploadError: "",
   profileSelectedFileName: "",
   selectedJob: null,
-  tone: "business",
   loading: false,
   searchBotMessages: [],
 };
@@ -153,7 +152,6 @@ function defaultLocalState() {
     directParsedJobs: [],
     enabledChannelIds: [...DEFAULT_ENABLED_CHANNEL_IDS],
     customChannels: [],
-    tone: "business",
   };
 }
 
@@ -179,7 +177,6 @@ function localStateSnapshot() {
     directParsedJobs: compactJobsForStorage(state.jobs.direct || []),
     enabledChannelIds: state.enabledChannelIds,
     customChannels: state.customChannels,
-    tone: state.tone,
   };
 }
 
@@ -323,11 +320,9 @@ function jobSearchText(job) {
   return `${jobCompany(job)} ${jobTitle(job)} ${jobCareer(job)} ${jobLocation(job)} ${jobKeywords(job).join(" ")}`;
 }
 
-function toneText(job) {
+function jobMessageText(job) {
   const slack = jobSlackMessages(job);
   if (slack.message_title || slack.message_body) return [slack.message_title, slack.message_body].filter(Boolean).join(" ");
-  if (state.tone === "raw") return `${jobCompany(job)} · ${jobTitle(job)}`;
-  if (state.tone === "friendly") return `${jobCompany(job)}에서 ${jobTitle(job)} 포지션을 찾았어요. 현재 slack_messages는 ChatGPT API 미사용으로 비어 있습니다.`;
   return `${jobCompany(job)} 채용공고 원문 JSON입니다. slack_messages는 ChatGPT API 연동 전까지 빈 값으로 유지됩니다.`;
 }
 
@@ -351,7 +346,6 @@ async function loadState() {
   state.jobs.direct = data.directParsedJobs || [];
   state.enabledChannelIds = data.enabledChannelIds || [...DEFAULT_ENABLED_CHANNEL_IDS];
   state.customChannels = (data.customChannels || []).map((channel) => normalizeLocalChannel(channel, "custom"));
-  state.tone = data.tone || "business";
 }
 
 async function loadChannels() {
@@ -444,10 +438,6 @@ function renderChannel() {
     ${channelIntro(channel, "개발 단계에서는 JobKorea 크롤링 결과를 JSON_1 형태 그대로 보여줍니다. slack_messages는 ChatGPT API 연동 전까지 빈 값입니다.")}
     <div class="job-toolbar">
       <button data-refresh="${channel.id}">JobKorea 새로고침</button>
-      <label>톤
-        <input type="range" min="0" max="2" value="${["raw", "business", "friendly"].indexOf(state.tone)}" id="toneSlider" />
-        <span>${toneLabel()}</span>
-      </label>
     </div>
     <div class="day-divider"><span>${channel.query} results</span></div>
     ${jobs.length ? bottomAnchoredItems(jobs).map(renderJobMessage).join("") : emptyBlock("공고를 불러오는 중입니다.")}
@@ -509,7 +499,7 @@ function renderJobMessage(job) {
           <button class="message-name" data-open-dm="${job.id}">${escapeHtml(company)}</button>
           <span class="message-time">${escapeHtml(jobSource(job))}</span>
         </div>
-        <div class="message-text">${escapeHtml(toneText(job))}</div>
+        <div class="message-text">${escapeHtml(jobMessageText(job))}</div>
         ${renderJobCard(job)}
         <div class="reactions">
           ${reactionTypes.map((reaction) => `
@@ -914,10 +904,6 @@ function findJob(jobId) {
   return Object.values(state.jobs).flat().find((job) => String(job.id) === String(jobId));
 }
 
-function toneLabel() {
-  return { raw: "완전 raw", business: "비즈니스 레벨", friendly: "친근함" }[state.tone];
-}
-
 async function submitComposer(text) {
   if (state.activeMode === "channel" && state.activeChannel === "direct") {
     const match = text.match(/https?:\/\/\S+/);
@@ -1180,11 +1166,6 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("input", (event) => {
-  if (event.target.id === "toneSlider") {
-    state.tone = ["raw", "business", "friendly"][Number(event.target.value)];
-    saveLocalState();
-    render();
-  }
   if (event.target.id === "channelFilter") {
     renderChannelManager();
   }

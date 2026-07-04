@@ -1568,7 +1568,6 @@ def build_docs_payload():
             {"name": "공고별 DM 노트", "status": "implemented", "detail": "공고 DM/스레드 reply로 자소서 초안 및 메모를 브라우저 localStorage에 저장"},
             {"name": "PDF 이력서/포트폴리오 분석", "status": "implemented", "detail": "Resume & Portfolio DM에서 PDF만 업로드하고 OpenAI Responses API로 구조화 JSON을 생성한 뒤 브라우저 localStorage에 저장"},
             {"name": "로컬 매칭 패널", "status": "implemented", "detail": "PDF 분석 JSON의 키워드와 공고 정보를 기반으로 로컬 매칭"},
-            {"name": "톤 조절", "status": "implemented", "detail": "raw, business, friendly 3단계 슬라이더"},
             {"name": "자연어 검색 DM", "status": "implemented", "detail": "문장에서 핵심 키워드 추출 후 JobKorea 검색"},
             {"name": "검색 봇 DM", "status": "implemented", "detail": "로컬 intent 파서 + JobKorea 크롤링 trace 표시"},
             {"name": "Vercel 배포", "status": "implemented", "detail": "public 정적 파일과 api/index.py Python 함수로 배포"},
