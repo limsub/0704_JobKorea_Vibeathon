@@ -1,12 +1,14 @@
-# 슬쩍 ngrok 공유 및 개인정보 가이드
+# 슬쩍 Vercel 배포 및 개인정보 가이드
 
 이 문서는 현재 MVP 기준의 실행, 공유, 데이터 취급 원칙을 정리한다.
 
 ## 1. 현재 운영 기준
 
-- 웹앱은 `main_project/server.py`로 로컬에서 실행한다.
-- 다른 팀에는 같은 Wi-Fi 주소가 아니라 public tunnel URL을 공유한다.
-- GPT API Key, OpenAI API, 로컬 Codex CLI는 사용하지 않는다.
+- 웹앱은 Vercel Python Runtime으로 배포하거나 `main_project/server.py`로 로컬에서 실행한다.
+- 다른 팀에는 Vercel 배포 URL을 공유한다.
+- 로컬 데모만 임시 public tunnel URL을 공유한다.
+- Resume & Portfolio PDF 분석을 사용할 경우 서버 환경변수에 `OPENAI_API_KEY`를 설정한다.
+- 로컬 Codex CLI는 사용하지 않는다.
 - JobKorea 공고 검색/파싱은 서버의 크롤러가 수행한다.
 - 검색 의도와 매칭은 로컬 키워드 파서가 수행한다.
 
@@ -18,15 +20,15 @@
 ./scripts/start_server.sh
 ```
 
-Cloudflare quick tunnel 공유:
+Vercel 배포:
 
 ```bash
-./scripts/start_cloudflared.sh
+vercel deploy
 ```
 
-터미널에 표시되는 `trycloudflare.com` URL을 팀원에게 공유한다.
+Vercel이 출력하는 배포 URL을 팀원에게 공유한다.
 
-ngrok 공유:
+로컬 ngrok 공유:
 
 ```bash
 ./scripts/start_ngrok.sh
@@ -42,6 +44,12 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다. 데모가 끝나
 data/state.json
 ```
 
+Vercel 배포 환경에서는 서버리스 파일 시스템 제약 때문에 아래 경로에 임시 저장된다.
+
+```text
+/tmp/jobkorea-vibe-state/state.json
+```
+
 저장 항목:
 
 - 채널 표시 상태
@@ -55,7 +63,7 @@ data/state.json
 
 ## 4. 공유 주의사항
 
-- public tunnel URL을 받은 사람은 접속할 수 있다.
+- Vercel 배포 URL 또는 public tunnel URL을 받은 사람은 접속할 수 있다.
 - URL은 발표/테스트 대상자에게만 공유한다.
 - 데모 종료 후 ngrok 프로세스를 종료한다.
 - 운영 서비스로 확장할 경우 데모 토큰, 인증, 입력 URL 제한, 크롤링 요청 제한을 추가한다.

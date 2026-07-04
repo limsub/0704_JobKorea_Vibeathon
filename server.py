@@ -16,8 +16,13 @@ import zlib
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+PUBLIC_DIR = os.path.join(ROOT, "public")
 DATA_DIR = os.path.join(ROOT, "data")
-STATE_PATH = os.path.join(DATA_DIR, "state.json")
+STATE_DIR = os.environ.get(
+    "STATE_DIR",
+    os.path.join(tempfile.gettempdir(), "jobkorea-vibe-state") if os.environ.get("VERCEL") else DATA_DIR,
+)
+STATE_PATH = os.environ.get("STATE_PATH", os.path.join(STATE_DIR, "state.json"))
 ROLE_CATALOG_PATH = os.path.join(DATA_DIR, "job_roles.json")
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 MAX_UPLOAD_BYTES = 40 * 1024 * 1024
@@ -442,7 +447,7 @@ def default_state():
 
 
 def ensure_state():
-    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
     if not os.path.exists(STATE_PATH):
         write_state(default_state())
         return
@@ -485,7 +490,7 @@ def read_state():
 
 
 def write_state(state):
-    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
     with open(STATE_PATH, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
@@ -1553,20 +1558,23 @@ def local_recruiter_search(message):
 
 def build_docs_payload():
     state = read_state()
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "5174"))
     return {
         "project": {
             "name": "JobKorea Vibe Slack Dashboard",
-            "version": "local prototype",
+            "version": "vercel-ready prototype",
             "servedAt": time.strftime("%Y-%m-%d %H:%M:%S"),
             "entry": "/",
             "dashboard": "/dashboard.html",
         },
         "runtime": {
-            "host": os.environ.get("HOST", "127.0.0.1"),
-            "port": int(os.environ.get("PORT", "5174")),
+            "host": host,
+            "port": port,
             "dataPath": STATE_PATH,
             "roleCatalogPath": ROLE_CATALOG_PATH,
-            "externalShare": "ngrok http 5174",
+            "deployment": "vercel" if os.environ.get("VERCEL") else "local",
+            "externalShare": f"ngrok http {port}",
             "aiProvider": "OpenAI Responses API for one-time PDF profile analysis",
         },
         "features": [
@@ -1581,7 +1589,8 @@ def build_docs_payload():
             {"name": "톤 조절", "status": "implemented", "detail": "raw, business, friendly 3단계 슬라이더"},
             {"name": "자연어 검색 DM", "status": "implemented", "detail": "문장에서 핵심 키워드 추출 후 JobKorea 검색"},
             {"name": "검색 봇 DM", "status": "implemented", "detail": "로컬 intent 파서 + JobKorea 크롤링 trace 표시"},
-            {"name": "ngrok 외부 공유", "status": "implemented", "detail": "scripts/start_ngrok.sh로 public URL 생성"},
+            {"name": "Vercel 배포", "status": "implemented", "detail": "public 정적 파일과 api/index.py Python 함수로 배포"},
+            {"name": "ngrok 외부 공유", "status": "implemented", "detail": "scripts/start_ngrok.sh로 로컬 public URL 생성"},
             {"name": "ChatGPT API 슬랙 메시지 변환", "status": "planned", "detail": "PROMPT_1로 공고 정보를 slack_messages.message_title/message_body로 변환 예정"},
         ],
         "apis": [
@@ -1615,6 +1624,9 @@ def build_docs_payload():
 
 
 class Handler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=PUBLIC_DIR if os.path.isdir(PUBLIC_DIR) else ROOT, **kwargs)
+
     def end_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
@@ -1735,9 +1747,11 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(data)
 
 
+handler = Handler
+
+
 if __name__ == "__main__":
     ensure_state()
-    os.chdir(ROOT)
     host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "5174"))
     print(f"Serving JobKorea Vibe on http://{host}:{port}", flush=True)

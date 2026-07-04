@@ -3,8 +3,9 @@
 - 기준 폴더: `main_project/`
 - 서버: Python 표준 라이브러리 HTTP server
 - 프론트엔드: 정적 HTML/CSS/JS 단일 페이지 앱
-- 외부 공유: Cloudflare quick tunnel 또는 ngrok public URL
-- AI/GPT/Codex: 현재 MVP에서는 사용하지 않음
+- 외부 배포: Vercel Python Runtime
+- 로컬 임시 공유: ngrok public URL
+- AI/GPT/Codex: Resume & Portfolio PDF 분석에서 OpenAI Responses API 선택 사용
 
 ## 1. 실행 스펙
 
@@ -21,15 +22,14 @@ cd main_project
 http://127.0.0.1:5174
 ```
 
-팀 공유, Cloudflare quick tunnel:
+Vercel 배포:
 
 ```bash
-./scripts/start_cloudflared.sh
+vercel dev
+vercel deploy
 ```
 
-터미널에 표시되는 `trycloudflare.com` URL을 팀원에게 공유한다.
-
-팀 공유, ngrok:
+로컬 임시 공유, ngrok:
 
 ```bash
 ./scripts/start_ngrok.sh
@@ -39,14 +39,15 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 
 ## 2. 주요 파일
 
-- `index.html`: Slack 스타일 메인 UI
-- `styles.css`: Slack 스타일 레이아웃과 채널 관리 모달 스타일
-- `app.js`: 채널, DM, 스레드, 검색, 메모, 프로필, 로컬 매칭 렌더링
+- `public/index.html`: Slack 스타일 메인 UI
+- `public/styles.css`: Slack 스타일 레이아웃과 채널 관리 모달 스타일
+- `public/app.js`: 채널, DM, 스레드, 검색, 메모, 프로필, 로컬 매칭 렌더링
 - `server.py`: API 서버, JobKorea 크롤링, URL 파싱, 상태 저장
+- `api/index.py`: Vercel Serverless Function 엔트리포인트
+- `vercel.json`: `/api/*` 요청을 Python 함수로 라우팅
 - `data/job_roles.json`: 로컬 직군 채널 카탈로그
 - `data/state.json`: 채널 표시 상태, 사용자 채널, 메모, 분류, 프로필 저장
 - `scripts/start_server.sh`: 로컬 서버 실행
-- `scripts/start_cloudflared.sh`: 로컬 서버 실행 후 Cloudflare quick tunnel 실행
 - `scripts/start_ngrok.sh`: 로컬 서버 실행 후 ngrok 터널 실행
 
 ## 3. 구현 기능
@@ -62,7 +63,7 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 9. 자연어 검색 DM
 10. 검색 봇 DM의 로컬 intent trace
 11. 프로필/공고 키워드 기반 로컬 매칭
-12. public tunnel URL 공유
+12. Vercel 배포와 ngrok 로컬 임시 공유
 13. 채널 공고 셀에서 `JSON_1 공고 정보` 원문 표시
 
 ## 4. 채널 스펙
@@ -94,6 +95,7 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 | POST | `/api/classify` | 공고 이모지 분류 저장 |
 | POST | `/api/note` | 공고별 메모 저장 |
 | POST | `/api/profile` | 프로필 텍스트 저장 |
+| POST | `/api/profile/analyze-pdf` | PDF 업로드 후 OpenAI Responses API 분석 |
 | POST | `/api/match` | 공고와 프로필의 로컬 매칭 계산 |
 | POST | `/api/ai-search` | 기존 프론트 호환용 이름. 실제 동작은 로컬 검색 봇 |
 
@@ -135,6 +137,8 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 
 `data/state.json`:
 
+로컬 서버에서는 `data/state.json`에 상태를 저장한다. Vercel에서는 서버리스 파일 시스템 제약 때문에 `/tmp/jobkorea-vibe-state/state.json`에 임시 저장한다.
+
 ```json
 {
   "notes": {},
@@ -155,18 +159,16 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 
 현재 MVP에서는 아래를 사용하지 않는다.
 
-- GPT API Key
-- OpenAI API 호출
 - 로컬 Codex CLI 호출
 - 같은 Wi-Fi 또는 로컬 IP 기반 팀 접속 전제
 
 ## 8. 추후 구현 필요 항목
 
-- ChatGPT API Key 설정
 - `PROMPT_1 공고 정보 -> 슬랙 메세지 변환` 작성
 - 서버에서 공고 JSON을 ChatGPT API에 전달
 - 응답을 `slack_messages.message_title`, `slack_messages.message_body`에 저장
 - 채널 화면을 JSON 원문 표시에서 Slack 메시지 표시로 전환
+- 영구 저장이 필요할 경우 Vercel KV/Postgres/Supabase 같은 외부 저장소 연동
 
 ## 9. 검증 기준
 
@@ -178,5 +180,5 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 6. 채널 화면에서 공고 JSON이 그대로 표시된다.
 7. 채널 관리 모달에서 직군 채널을 표시/숨김할 수 있다.
 8. 사용자 채널을 추가/삭제할 수 있다.
-9. cloudflared 설치 환경에서 `./scripts/start_cloudflared.sh`가 public URL을 출력한다.
+9. `vercel.json`이 `/api/*` 요청을 `api/index.py`로 라우팅한다.
 10. ngrok 설치 환경에서 `./scripts/start_ngrok.sh`도 public URL을 출력한다.

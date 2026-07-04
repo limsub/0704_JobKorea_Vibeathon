@@ -22,7 +22,7 @@
 ## 오늘 기준 핵심 결정
 
 - 실제 운영 서버는 만들지 않는다.
-- 로컬 서버를 띄우고 Cloudflare quick tunnel 또는 ngrok 링크로 공유한다.
+- Vercel 배포 URL을 공유한다. 로컬 데모만 ngrok 링크로 공유한다.
 - 로그인은 만들지 않는다.
 - 데이터는 `data/state.json`에 저장한다.
 - GPT API Key와 로컬 Codex는 사용하지 않는다.
