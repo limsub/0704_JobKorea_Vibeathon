@@ -701,16 +701,6 @@ button.avatar-photo:hover {
   font-size: 13px;
 }
 
-.briefing-avatar {
-  background: #1264a3;
-  font-size: 18px;
-}
-
-.prep-avatar {
-  background: #007a5a;
-  font-size: 18px;
-}
-
 .message-content {
   min-width: 0;
 }
@@ -757,6 +747,16 @@ button.avatar-photo:hover {
   border: 1px solid #d8d8d8;
   border-radius: 4px;
   background: #f6f6f6;
+}
+
+.message-text a {
+  color: var(--blue);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.message-text a:hover {
+  text-decoration: underline;
 }
 
 .message-actions {

@@ -1447,6 +1447,7 @@ function renderJobDm(job) {
     <div class="day-divider"><span>공고 브리핑</span></div>
     ${renderJobDmBriefing(job)}
     ${renderJobDmPrepReply(job)}
+    ${renderJobDmUrlReply(job)}
     <div class="day-divider"><span>AI matching</span></div>
     ${shouldShowMatch ? (cachedMatch ? renderMatch(cachedMatch, job) : renderMatchSkeleton()) : renderNoProfileMatchReply(job)}
     <div class="day-divider"><span>My notes</span></div>
@@ -1456,19 +1457,21 @@ function renderJobDm(job) {
         <div><div class="message-meta"><span class="message-name">Me</span><span class="message-time">${note.createdAt}</span></div>
         <div class="message-text">${escapeHtml(note.text)}</div></div>
       </article>
-    `).join("") : emptyBlock("아직 기록이 없습니다. composer에 자소서 초안/인재상/메모를 남겨보세요.")}
+    `).join("") : emptyBlock("이 공고에 대한 메모를 기록하세요.")}
   `;
   if (shouldLoadMatch) loadJobDmMatch(job, jobId);
 }
 
 function renderJobDmBriefing(job) {
   const comment = jobSlackMessages(job).thread_comment || defaultDetails(job).join("\n");
+  const sender = jobSender(job);
+  const jobId = String(job.id);
   return `
     <article class="message job-dm-briefing-message">
-      <div class="message-avatar briefing-avatar">공</div>
+      ${renderAvatarElement(job, `data-open-dm="${escapeHtml(jobId)}" title="DM에 추가"`)}
       <div class="message-content">
         <div class="message-meta">
-          <span class="message-name">공고분석이</span>
+          <button class="message-name" data-open-dm="${escapeHtml(jobId)}">${escapeHtml(sender.name)}</button>
           <span class="message-time">세부 브리핑</span>
         </div>
         <div class="message-text">${escapeHtml(formatSlackText(comment))}</div>
@@ -1478,6 +1481,8 @@ function renderJobDmBriefing(job) {
 }
 
 function renderJobDmPrepReply(job) {
+  const sender = jobSender(job);
+  const jobId = String(job.id);
   const keywords = jobKeywords(job).slice(0, 5);
   const keywordText = keywords.length ? keywords.join(", ") : "원문 키워드 확인 필요";
   const location = jobLocation(job);
@@ -1495,13 +1500,31 @@ function renderJobDmPrepReply(job) {
   ].join("\n");
   return `
     <article class="message job-dm-prep-message">
-      <div class="message-avatar prep-avatar">메</div>
+      ${renderAvatarElement(job, `data-open-dm="${escapeHtml(jobId)}" title="DM에 추가"`)}
       <div class="message-content">
         <div class="message-meta">
-          <span class="message-name">메모도우미</span>
+          <button class="message-name" data-open-dm="${escapeHtml(jobId)}">${escapeHtml(sender.name)}</button>
           <span class="message-time">검토 가이드</span>
         </div>
         <div class="message-text">${escapeHtml(text)}</div>
+      </div>
+    </article>
+  `;
+}
+
+function renderJobDmUrlReply(job) {
+  const sender = jobSender(job);
+  const jobId = String(job.id);
+  const url = jobUrl(job);
+  return `
+    <article class="message job-dm-url-message">
+      ${renderAvatarElement(job, `data-open-dm="${escapeHtml(jobId)}" title="DM에 추가"`)}
+      <div class="message-content">
+        <div class="message-meta">
+          <button class="message-name" data-open-dm="${escapeHtml(jobId)}">${escapeHtml(sender.name)}</button>
+          <span class="message-time">원문 링크</span>
+        </div>
+        <div class="message-text">잡코리아 원문 URL도 같이 남겨둘게요.\n<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${escapeHtml(url)}</a></div>
       </div>
     </article>
   `;
