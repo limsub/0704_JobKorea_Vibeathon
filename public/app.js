@@ -396,6 +396,7 @@ async function boot() {
   if (!channels.some((channel) => channel.id === state.activeChannel)) {
     state.activeChannel = channels.find((channel) => channel.id !== "direct")?.id || channels[0]?.id || "direct";
   }
+  if (window.__slezzukPendingMode === "later") state.activeMode = "later";
   render();
   await Promise.all(channels.filter((channel) => channel.id !== "direct").map((channel) => loadJobs(channel.id)));
   render();
@@ -524,9 +525,13 @@ function openLaterView(reactionKey = state.activeLaterReaction) {
   state.activeMode = "later";
   state.activeDm = null;
   if (reactionKey && validReactionKeys.has(reactionKey)) state.activeLaterReaction = reactionKey;
+  window.__slezzukPendingMode = "later";
   closeThreadPanel();
   render();
 }
+
+window.JobKoreaVibeOpenLater = () => openLaterView();
+window.addEventListener("slezzuk:open-later", () => openLaterView());
 
 function renderChannel() {
   const channel = currentChannel();

@@ -41,7 +41,7 @@
           <span class="rail-icon">◷</span>
           <span>Activity</span>
         </button>
-        <button class="rail-item" id="laterRailButton" type="button" aria-label="Later" data-later-view>
+        <button class="rail-item" id="laterRailButton" type="button" aria-label="Later" data-later-view onclick="window.__slezzukPendingMode='later'; if (window.JobKoreaVibeOpenLater) window.JobKoreaVibeOpenLater(); else window.dispatchEvent(new CustomEvent('slezzuk:open-later')); return false;">
           <span class="rail-icon">☆</span>
           <span>Later</span>
         </button>
@@ -187,6 +187,6 @@
       </div>
     </div>
 
-    <script src="./app.js"></script>
+    <script src="./app.js?v=20260704-later-rail"></script>
   </body>
 </html>
