@@ -2294,31 +2294,195 @@ def search_jobkorea(query, limit=10):
     return hydrate_slack_messages(jobs[:limit])
 
 
-def parse_posting_url(url):
-    text = fetch_text(url)
-    visible = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.S | re.I)
+def validate_posting_url(url):
+    url = clean_text(url)
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("http 또는 https 채용공고 URL만 분석할 수 있습니다.")
+    host = (parsed.hostname or "").lower()
+    blocked_hosts = {"localhost", "0.0.0.0", "127.0.0.1", "::1"}
+    if (
+        host in blocked_hosts
+        or host.startswith("127.")
+        or host.startswith("10.")
+        or host.startswith("192.168.")
+        or host.startswith("169.254.")
+        or re.match(r"^172\.(1[6-9]|2\d|3[0-1])\.", host)
+    ):
+        raise ValueError("외부에서 접근 가능한 채용공고 URL만 분석할 수 있습니다.")
+    return url
+
+
+def strip_visible_text(html_text):
+    visible = re.sub(r"<script[^>]*>.*?</script>", " ", html_text, flags=re.S | re.I)
     visible = re.sub(r"<style[^>]*>.*?</style>", " ", visible, flags=re.S | re.I)
-    visible = clean_text(visible)
-    title = ""
-    title_match = re.search(r"<title[^>]*>(.*?)</title>", text, re.S | re.I)
-    if title_match:
-        title = clean_text(title_match.group(1))
-    if not title:
-        og_match = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)', text, re.I)
-        title = clean_text(og_match.group(1)) if og_match else "Parsed posting"
-    company = "JobKorea" if "jobkorea.co.kr" in url else urllib.parse.urlparse(url).netloc
-    bullets = split_summary(visible)
-    keywords = infer_keywords(visible)
+    visible = re.sub(r"<noscript[^>]*>.*?</noscript>", " ", visible, flags=re.S | re.I)
+    return clean_text(visible)
+
+
+def meta_content(html_text, names):
+    names = {name.lower() for name in names}
+    for tag in re.findall(r"<meta\b[^>]*>", html_text, flags=re.I):
+        name_match = re.search(r'(?:property|name)=["\']([^"\']+)["\']', tag, flags=re.I)
+        if not name_match or name_match.group(1).lower() not in names:
+            continue
+        content_match = re.search(r'content=["\']([^"\']*)["\']', tag, flags=re.I)
+        if content_match:
+            return clean_text(content_match.group(1))
+    return ""
+
+
+def json_ld_values(value):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [clean_text(value)]
+    if isinstance(value, (int, float, bool)):
+        return [str(value)]
+    if isinstance(value, list):
+        values = []
+        for item in value:
+            values.extend(json_ld_values(item))
+        return values
+    if isinstance(value, dict):
+        priority = []
+        for key in ["name", "text", "value", "streetAddress", "addressLocality", "addressRegion", "addressCountry"]:
+            if key in value:
+                priority.extend(json_ld_values(value.get(key)))
+        if priority:
+            return priority
+        values = []
+        for item in value.values():
+            values.extend(json_ld_values(item))
+        return values
+    return [clean_text(value)]
+
+
+def json_ld_text(value):
+    return clean_text(" ".join(json_ld_values(value)))
+
+
+def extract_json_ld_objects(html_text):
+    objects = []
+    for script in re.findall(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html_text, flags=re.S | re.I):
+        payload = html.unescape(script.strip())
+        if not payload:
+            continue
+        try:
+            parsed = json.loads(payload)
+        except Exception:
+            continue
+        objects.append(parsed)
+    return objects
+
+
+def flatten_json_ld(value):
+    items = []
+    if isinstance(value, list):
+        for item in value:
+            items.extend(flatten_json_ld(item))
+    elif isinstance(value, dict):
+        items.append(value)
+        for key in ["@graph", "itemListElement"]:
+            if key in value:
+                items.extend(flatten_json_ld(value.get(key)))
+    return items
+
+
+def find_jobposting_json_ld(html_text):
+    for payload in extract_json_ld_objects(html_text):
+        for item in flatten_json_ld(payload):
+            item_type = item.get("@type") or item.get("type")
+            types = item_type if isinstance(item_type, list) else [item_type]
+            if any(str(type_name).lower() == "jobposting" for type_name in types):
+                return item
+    return {}
+
+
+def extract_posting_title(html_text, jobposting):
+    title = json_ld_text(jobposting.get("title")) if jobposting else ""
+    if title:
+        return title
+    title = meta_content(html_text, ["og:title", "twitter:title"])
+    if title:
+        return title
+    title_match = re.search(r"<title[^>]*>(.*?)</title>", html_text, re.S | re.I)
+    return clean_text(title_match.group(1)) if title_match else "Parsed posting"
+
+
+def extract_posting_company(url, html_text, jobposting):
+    company = json_ld_text((jobposting or {}).get("hiringOrganization"))
+    if company:
+        return company
+    company = meta_content(html_text, ["og:site_name", "application-name"])
+    if company:
+        return company
+    if "jobkorea.co.kr" in url:
+        return "JobKorea"
+    host = urllib.parse.urlparse(url).netloc
+    return host.replace("www.", "")
+
+
+def extract_posting_description(html_text, visible, jobposting):
+    description = json_ld_text((jobposting or {}).get("description"))
+    if description:
+        return strip_visible_text(description)
+    description = meta_content(html_text, ["description", "og:description", "twitter:description"])
+    return description or visible
+
+
+def extract_posting_period(jobposting, visible):
+    valid_through = clean_text((jobposting or {}).get("validThrough"))
+    date_posted = clean_text((jobposting or {}).get("datePosted"))
+    if date_posted and valid_through:
+        return f"{date_posted[:10]} ~ {valid_through[:10]}"
+    if valid_through:
+        return f"~ {valid_through[:10]}"
+    return infer_period(visible)
+
+
+def extract_posting_salary(jobposting):
+    salary = (jobposting or {}).get("baseSalary")
+    text = json_ld_text(salary)
+    return text or "공고 상세 참고"
+
+
+def extract_posting_career(jobposting, visible):
+    requirements = " ".join(json_ld_values((jobposting or {}).get("experienceRequirements")))
+    qualifications = " ".join(json_ld_values((jobposting or {}).get("qualifications")))
+    return infer_career(" ".join([requirements, qualifications, visible]))
+
+
+def extract_posting_location(jobposting, visible):
+    location = json_ld_text((jobposting or {}).get("jobLocation"))
+    return location or infer_location(visible)
+
+
+def stable_parsed_job_id(url):
+    return f"parsed_{hashlib.sha256(clean_text(url).encode('utf-8')).hexdigest()[:16]}"
+
+
+def parse_posting_url(url):
+    url = validate_posting_url(url)
+    text = fetch_text(url)
+    jobposting = find_jobposting_json_ld(text)
+    visible = strip_visible_text(text)
+    description = extract_posting_description(text, visible, jobposting)
+    title = extract_posting_title(text, jobposting)
+    company = extract_posting_company(url, text, jobposting)
+    content_for_inference = " ".join([title, company, description, visible])
+    bullets = split_summary(description or visible)
+    keywords = infer_keywords(content_for_inference)
     job = build_job_payload(
-        source="parsed_url",
+        source="direct_url",
         source_url=url,
         raw={
             "title": title,
             "company_name": company,
-            "career": infer_career(visible),
-            "location": infer_location(visible),
-            "salary": "공고 상세 참고",
-            "period": infer_period(visible),
+            "career": extract_posting_career(jobposting, visible),
+            "location": extract_posting_location(jobposting, visible),
+            "salary": extract_posting_salary(jobposting),
+            "period": extract_posting_period(jobposting, visible),
             "raw_text": visible,
         },
         job_profile={
@@ -2327,7 +2491,7 @@ def parse_posting_url(url):
             "required_skills": keywords,
             "responsibilities": bullets[:4],
         },
-        job_id=f"parsed_{abs(hash(url))}",
+        job_id=stable_parsed_job_id(url),
     )
     return hydrate_slack_messages([job])[0]
 
@@ -2363,8 +2527,18 @@ def infer_location(text):
 
 
 def infer_keywords(text):
-    candidates = ["PM", "PO", "iOS", "Swift", "서버", "백엔드", "Java", "Spring", "Node", "Python", "React", "SQL", "AI", "데이터", "서비스기획"]
-    return [k for k in candidates if k.lower() in text.lower()][:8]
+    candidates = [
+        "PM", "PO", "Product Manager", "Product Owner", "서비스기획", "사업기획", "프로덕트",
+        "iOS", "Swift", "Android", "Kotlin", "서버", "백엔드", "프론트엔드", "Java",
+        "Spring", "Node", "Python", "React", "TypeScript", "JavaScript", "SQL", "AWS",
+        "Docker", "Kubernetes", "AI", "LLM", "데이터", "데이터분석", "마케팅", "브랜드",
+        "디자인", "UX", "UI", "QA", "DevOps", "보안", "CRM", "커머스", "게임",
+    ]
+    return merge_keywords(
+        [k for k in candidates if k.lower() in text.lower()],
+        extract_keyword_candidates(text, limit=40),
+        limit=12,
+    )
 
 
 def collect_text_values(value):
@@ -2923,6 +3097,12 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json({"ok": True, "localOnly": True, "notes": [note]})
             if parsed.path == "/api/profile":
                 return self.json({"ok": True, "localOnly": True, "profile": payload.get("profile", {})})
+            if parsed.path == "/api/parse-url":
+                url = clean_text(payload.get("url"))
+                if not url:
+                    return self.json({"error": "url is required"}, 400)
+                job = parse_posting_url(url)
+                return self.json({"job": job})
             if parsed.path == "/api/match":
                 job = payload.get("job", {})
                 result = match_job_with_profile(

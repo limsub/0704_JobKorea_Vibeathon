@@ -110,6 +110,7 @@ const state = {
   savedJobs: {},
   openJobDmIds: [],
   openedJobDms: {},
+  analyzeJobMessages: [],
   channelLoading: {},
   channelCatalog: [],
   enabledChannelIds: [],
@@ -292,6 +293,7 @@ function defaultLocalState() {
     savedJobs: {},
     openJobDmIds: [],
     openedJobDms: {},
+    analyzeJobMessages: [],
     enabledChannelIds: [...DEFAULT_ENABLED_CHANNEL_IDS],
     customChannels: [],
   };
@@ -338,6 +340,7 @@ function localStateSnapshot() {
     savedJobs: compactSavedJobsForStorage(state.savedJobs),
     openJobDmIds: state.openJobDmIds,
     openedJobDms: compactSavedJobsForStorage(state.openedJobDms),
+    analyzeJobMessages: compactAnalyzeJobMessages(state.analyzeJobMessages),
     enabledChannelIds: state.enabledChannelIds,
     customChannels: state.customChannels,
   };
@@ -395,6 +398,16 @@ function compactSavedJobsForStorage(savedJobs = {}) {
   );
 }
 
+function compactAnalyzeJobMessages(messages = []) {
+  return messages.slice(-30).map((message) => ({
+    ...message,
+    response: {
+      ...(message.response || {}),
+      job: message.response?.job ? compactJobsForStorage([message.response.job])[0] : null,
+    },
+  }));
+}
+
 function saveLocalState() {
   const snapshot = localStateSnapshot();
   try {
@@ -435,6 +448,10 @@ function savedJobIds() {
 function knownJobMap() {
   const jobs = new Map();
   Object.values(state.openedJobDms || {}).forEach((job) => {
+    if (job?.id != null) jobs.set(String(job.id), job);
+  });
+  (state.analyzeJobMessages || []).forEach((message) => {
+    const job = message.response?.job;
     if (job?.id != null) jobs.set(String(job.id), job);
   });
   Object.values(state.savedJobs || {}).forEach((job) => {
@@ -602,6 +619,11 @@ async function loadState() {
   state.savedJobs = data.savedJobs || {};
   state.openJobDmIds = (data.openJobDmIds || []).map(String).slice(0, 12);
   state.openedJobDms = data.openedJobDms || {};
+  state.analyzeJobMessages = (data.analyzeJobMessages || []).map((message) => (
+    message.response?.status === "running"
+      ? { ...message, response: { status: "failed", job: null, error: "페이지 분석이 중단되었습니다. URL을 다시 보내 주세요." } }
+      : message
+  ));
   state.channelLoading = {};
   state.enabledChannelIds = data.enabledChannelIds || [...DEFAULT_ENABLED_CHANNEL_IDS];
   state.customChannels = (data.customChannels || []).map((channel) => normalizeLocalChannel(channel, "custom"));
@@ -756,6 +778,7 @@ function renderSidebar() {
   });
   const fixed = [
     { id: "search", name: "Search", icon: "⌕" },
+    { id: "analyze-job", name: "Analyze Job Posting", icon: "🔗" },
     { id: "profile", name: "Resume & Portfolio", icon: "📎" },
   ];
 
@@ -993,6 +1016,7 @@ function loadingStatusText(loading = {}) {
   if (loading.phase === "more") return "나머지 공고를 이어서 채우는 중입니다.";
   if (loading.phase === "profile") return "PDF를 읽고 프로필 키워드를 정리하는 중입니다.";
   if (loading.phase === "search") return "자연어 요청을 공고 검색어로 바꾸고 결과를 정리하는 중입니다.";
+  if (loading.phase === "url-parse") return "채용 페이지를 열고 공고 본문을 파싱하는 중입니다.";
   return "JobKorea에서 공고를 가져오는 중입니다.";
 }
 
@@ -1151,10 +1175,14 @@ function renderThreadDetailComment(job) {
 
 function renderDm(options = {}) {
   if (state.activeDm === "ai-search") renderAiSearchDm();
+  else if (state.activeDm === "analyze-job") renderAnalyzeJobDm();
   else if (state.activeDm === "profile") renderProfileDm();
   else if (state.activeDm === "search") renderSearchDm();
   else renderJobDm(findJob(state.activeDm?.replace("job:", "")));
-  if (!options.preserveMessageScroll) scrollToTop(messageList);
+  if (!options.preserveMessageScroll) {
+    if (state.activeDm === "analyze-job" || state.activeDm?.startsWith("job:")) scrollToBottom(messageList);
+    else scrollToTop(messageList);
+  }
 }
 
 function renderAiSearchDm() {
@@ -1352,6 +1380,28 @@ function renderSearchDm() {
   `;
 }
 
+function renderAnalyzeJobDm() {
+  channelTitle.textContent = "Analyze Job Posting";
+  channelSubtitle.textContent = "잡코리아 또는 회사 채용 페이지 URL을 붙여넣으면 공고 내용을 파싱합니다.";
+  if (memberCount) memberCount.textContent = "parser";
+  bookmarks.innerHTML = `<button class="bookmark">JobKorea URL</button><button class="bookmark">Company career page</button>`;
+  messageInput.placeholder = "채용공고 URL 붙여넣기";
+  messageList.innerHTML = `
+    <section class="channel-intro analyze-job-intro">
+      <div class="intro-icon">URL</div>
+      <h2>Analyze Job Posting</h2>
+      <p>웹에 있는 채용공고 링크를 그대로 보내면, 본문을 읽고 Slack에서 보기 좋은 요약 메시지로 바꿔드립니다.</p>
+      <div class="intro-meta">
+        <span>JobKorea</span>
+        <span>회사 채용 페이지</span>
+      </div>
+    </section>
+    <div id="analyzeJobResults">
+      ${state.analyzeJobMessages.length ? bottomAnchoredItems(state.analyzeJobMessages).map(renderAnalyzeJobTurn).join("") : emptyBlock("분석할 채용공고 URL을 composer에 붙여넣어 주세요.")}
+    </div>
+  `;
+}
+
 function renderJobDm(job) {
   if (!job) return;
   const sender = jobSender(job);
@@ -1371,6 +1421,68 @@ function renderJobDm(job) {
         <div class="message-text">${escapeHtml(note.text)}</div></div>
       </article>
     `).join("") : emptyBlock("아직 기록이 없습니다. composer에 자소서 초안/인재상/메모를 남겨보세요.")}
+  `;
+}
+
+function renderAnalyzeJobTurn(turn) {
+  const running = turn.response?.status === "running";
+  const failed = turn.response?.status === "failed";
+  const job = turn.response?.job;
+  return `
+    <article class="message">
+      <div class="message-avatar" style="background:#007a5a">ME</div>
+      <div>
+        <div class="message-meta"><span class="message-name">Me</span><span class="message-time">${escapeHtml(turn.time || "")}</span></div>
+        <div class="message-text">${escapeHtml(turn.message)}</div>
+      </div>
+    </article>
+    <article class="message analyze-url-reply">
+      <div class="message-avatar analyze-url-avatar">AJ</div>
+      <div class="message-content">
+        <div class="message-meta">
+          <span class="message-name">Analyze Job Posting</span>
+          <span class="message-time">${running ? "분석 중" : failed ? "분석 실패" : "URL parsed"}</span>
+        </div>
+        ${running ? `
+          <div class="message-text">링크를 열어서 공고 본문과 메타 정보를 읽고 있어요. 페이지 구조에 따라 몇 초 걸릴 수 있습니다.</div>
+          ${renderLoadingBar({ phase: "url-parse" })}
+          ${renderJobSkeletons(1, true)}
+        ` : failed ? `
+          <div class="message-text">이 URL은 바로 분석하지 못했어요.\n${escapeHtml(turn.response?.error || "페이지 접근 또는 파싱 중 오류가 발생했습니다.")}</div>
+        ` : job ? `
+          <div class="message-text">링크 열어봤고, 지금 보이는 정보 기준으로 이렇게 정리했어요.</div>
+          ${renderAnalyzedJobMessage(job)}
+        ` : `
+          <div class="message-text">분석 결과가 비어 있습니다. URL을 다시 확인해 주세요.</div>
+        `}
+      </div>
+    </article>
+  `;
+}
+
+function renderAnalyzedJobMessage(job) {
+  const jobId = String(job.id);
+  return `
+    <div class="analyzed-job-result job-message ${threadPanel.classList.contains("open") && String(state.selectedJob?.id) === jobId ? "thread-selected" : ""}" data-job="${escapeHtml(jobId)}" tabindex="0">
+      <div class="message-text">${escapeHtml(formatSlackText(jobMessageText(job)))}</div>
+      ${renderJobCard(job)}
+      <div class="reactions">
+        ${reactionTypes.map((reaction) => `
+          <button class="reaction ${selectedClassifications(jobId).includes(reaction.key) ? "selected" : ""}" data-classify="${escapeHtml(jobId)}" data-reaction="${reaction.key}" title="${reaction.label}">
+            <span>${reaction.emoji}</span><span>${reaction.label}</span>
+          </button>
+        `).join("")}
+      </div>
+      <button class="reply-summary" data-thread-job="${escapeHtml(jobId)}">
+        <span>${(state.notes[job.id] || []).length}개 메모</span>
+        <strong>스레드에서 상세/매칭 보기</strong>
+      </button>
+      <div class="message-actions analyze-result-actions">
+        <button title="DM에 추가" data-open-dm="${escapeHtml(jobId)}">💬</button>
+        <button title="Thread" data-thread-job="${escapeHtml(jobId)}">↪</button>
+        <button title="Open" data-open-url="${escapeHtml(jobUrl(job))}">↗</button>
+      </div>
+    </div>
   `;
 }
 
@@ -1510,6 +1622,11 @@ function defaultDetails(job) {
   ];
 }
 
+function extractFirstUrl(text = "") {
+  const match = String(text).match(/https?:\/\/[^\s<>"']+/);
+  return match ? match[0].replace(/[)\].,;!?]+$/, "") : "";
+}
+
 function renderMatch(match) {
   const score = Math.max(0, Math.min(100, Math.round(Number(match.score || 0))));
   const fallbackComment = [
@@ -1552,14 +1669,53 @@ function findJob(jobId) {
 
 async function submitComposer(text) {
   if (state.activeMode === "channel" && state.activeChannel === "direct") {
-    const match = text.match(/https?:\/\/\S+/);
-    if (!match) return alert("채용공고 URL을 붙여넣어 주세요.");
-    const data = await api(`/api/parse?url=${encodeURIComponent(match[0])}`);
-    if (!state.jobs.direct.some((job) => (job.source_url || job.url) === match[0])) {
+    const url = extractFirstUrl(text);
+    if (!url) return alert("채용공고 URL을 붙여넣어 주세요.");
+    const data = await api(`/api/parse?url=${encodeURIComponent(url)}`);
+    if (!state.jobs.direct.some((job) => (job.source_url || job.url) === url)) {
       state.jobs.direct.unshift(data.job);
       state.jobs.direct = state.jobs.direct.slice(0, 30);
       saveLocalState();
     }
+    render();
+    return;
+  }
+
+  if (state.activeMode === "dm" && state.activeDm === "analyze-job") {
+    const url = extractFirstUrl(text);
+    if (!url) return alert("분석할 채용공고 URL을 붙여넣어 주세요.");
+    const pending = {
+      id: `analyze-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      time: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+      message: url,
+      response: {
+        status: "running",
+        job: null,
+        error: "",
+      },
+    };
+    state.analyzeJobMessages.push(pending);
+    state.analyzeJobMessages = state.analyzeJobMessages.slice(-30);
+    saveLocalState();
+    render();
+    try {
+      const [data] = await Promise.all([
+        api("/api/parse-url", { method: "POST", body: JSON.stringify({ url }) }),
+        delay(500),
+      ]);
+      pending.response = {
+        status: "completed",
+        job: data.job,
+        error: "",
+      };
+    } catch (err) {
+      pending.response = {
+        status: "failed",
+        job: null,
+        error: err.message,
+      };
+    }
+    saveLocalState();
     render();
     return;
   }

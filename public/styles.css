@@ -696,6 +696,11 @@ button.avatar-photo:hover {
   box-shadow: 0 0 0 2px rgba(18, 100, 163, 0.24);
 }
 
+.analyze-url-avatar {
+  background: #1264a3;
+  font-size: 13px;
+}
+
 .message-content {
   min-width: 0;
 }
@@ -1787,6 +1792,25 @@ button.avatar-photo:hover {
   border-left: 4px solid var(--attachment);
   border-radius: 6px;
   background: #fff;
+}
+
+.analyzed-job-result {
+  position: relative;
+  max-width: 760px;
+  margin-top: 10px;
+}
+
+.analyzed-job-result:hover .message-actions {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.analyzed-job-result .job-slack-card {
+  max-width: 100%;
+}
+
+.analyze-url-reply .skeleton-message {
+  padding: 10px 0 0;
 }
 
 .attachment-thumb {
