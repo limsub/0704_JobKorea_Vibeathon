@@ -1090,15 +1090,7 @@ function renderJobSkeletons(count = SKELETON_JOB_COUNT, compact = false) {
       <div class="message-content">
         <div class="skeleton-line short"></div>
         <div class="skeleton-line long"></div>
-        <div class="skeleton-card">
-          <div class="skeleton-line title"></div>
-          <div class="skeleton-grid">
-            <span></span><span></span><span></span><span></span>
-          </div>
-          <div class="skeleton-tags">
-            <span></span><span></span><span></span>
-          </div>
-        </div>
+        <div class="skeleton-line long"></div>
       </div>
     </article>
   `).join("");
@@ -1145,7 +1137,6 @@ function renderJobMessage(job) {
           <span class="message-time">${escapeHtml(sender.title)} · ${escapeHtml(jobCompany(job))}</span>
         </div>
         <div class="message-text">${escapeHtml(formatSlackText(jobMessageText(job)))}</div>
-        ${renderJobCard(job)}
         <div class="reactions">
           ${reactionTypes.map((reaction) => `
             <button class="reaction ${selected.includes(reaction.key) ? "selected" : ""}" data-classify="${escapeHtml(jobId)}" data-reaction="${reaction.key}" title="${reaction.label}">
@@ -1167,28 +1158,6 @@ function renderJobMessage(job) {
   `;
 }
 
-function renderJobCard(job) {
-  const url = jobUrl(job);
-  const slack = jobSlackMessages(job);
-  const keyPoints = (slack.key_points?.length ? slack.key_points : jobKeywords(job)).slice(0, 6);
-  return `
-    <div class="job-slack-card">
-      <div class="job-card-head">
-        <div>
-          <span class="job-source">${escapeHtml(jobCompany(job))}</span>
-          <h3>${escapeHtml(jobTitle(job))}</h3>
-        </div>
-        <span class="job-dday">${escapeHtml(jobCareer(job))}</span>
-      </div>
-      ${keyPoints.length ? `<div class="job-roles">${keyPoints.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
-      <div class="job-card-footer">
-        <span>${escapeHtml(formatSlackText(slack.thread_summary || "스레드에서 상세 내용과 매칭을 확인하세요."))}</span>
-        <a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">원문 열기</a>
-      </div>
-    </div>
-  `;
-}
-
 function renderThreadParentMessage(job) {
   const jobId = String(job.id);
   const sender = jobSender(job);
@@ -1201,7 +1170,6 @@ function renderThreadParentMessage(job) {
           <span class="message-time">${escapeHtml(sender.title)} · ${escapeHtml(jobCompany(job))}</span>
         </div>
         <div class="message-text">${escapeHtml(formatSlackText(jobMessageText(job)))}</div>
-        ${renderJobCard(job)}
       </div>
     </article>
   `;
@@ -1646,7 +1614,6 @@ function renderAnalyzedJobMessage(job) {
   return `
     <div class="analyzed-job-result job-message ${threadPanel.classList.contains("open") && String(state.selectedJob?.id) === jobId ? "thread-selected" : ""}" data-job="${escapeHtml(jobId)}" tabindex="0">
       <div class="message-text">${escapeHtml(formatSlackText(jobMessageText(job)))}</div>
-      ${renderJobCard(job)}
       <div class="reactions">
         ${reactionTypes.map((reaction) => `
           <button class="reaction ${selectedClassifications(jobId).includes(reaction.key) ? "selected" : ""}" data-classify="${escapeHtml(jobId)}" data-reaction="${reaction.key}" title="${reaction.label}">

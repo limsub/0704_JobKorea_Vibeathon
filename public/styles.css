@@ -807,9 +807,6 @@ button.avatar-photo:hover {
 
 .skeleton-avatar,
 .skeleton-line,
-.skeleton-card,
-.skeleton-grid span,
-.skeleton-tags span,
 .profile-mini-skeleton span {
   position: relative;
   overflow: hidden;
@@ -818,9 +815,6 @@ button.avatar-photo:hover {
 
 .skeleton-avatar::after,
 .skeleton-line::after,
-.skeleton-card::after,
-.skeleton-grid span::after,
-.skeleton-tags span::after,
 .profile-mini-skeleton span::after {
   content: "";
   position: absolute;
@@ -854,48 +848,6 @@ button.avatar-photo:hover {
 
 .skeleton-line.long {
   width: min(620px, 82%);
-}
-
-.skeleton-line.title {
-  width: min(360px, 72%);
-  height: 18px;
-  margin: 0 0 14px;
-}
-
-.skeleton-card {
-  max-width: 720px;
-  margin-top: 10px;
-  padding: 14px;
-  border: 1px solid #e1e1e1;
-  border-radius: 8px;
-  background: #f7f7f7;
-}
-
-.skeleton-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.skeleton-grid span {
-  height: 34px;
-  border-radius: 6px;
-}
-
-.skeleton-tags {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.skeleton-tags span {
-  width: 86px;
-  height: 24px;
-  border-radius: 999px;
-}
-
-.compact-skeleton .skeleton-card {
-  display: none;
 }
 
 .reactions {
@@ -1537,106 +1489,6 @@ button.avatar-photo:hover {
   font-size: 13px;
 }
 
-.job-card,
-.job-slack-card {
-  max-width: 720px;
-  margin-top: 10px;
-  overflow: hidden;
-  border: 1px solid #d9d9d9;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
-}
-
-.job-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 14px 14px 12px;
-  border-left: 4px solid var(--blue);
-  background: linear-gradient(90deg, #f4f8fb, #fff);
-}
-
-.json-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 14px 14px 12px;
-  border-left: 4px solid var(--green);
-  background: #f7faf8;
-}
-
-.json-card-head h3 {
-  margin: 0;
-  color: var(--text);
-  font-size: 16px;
-  line-height: 1.32;
-}
-
-.job-source {
-  display: inline-block;
-  margin-bottom: 5px;
-  color: var(--blue);
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.job-card h3,
-.job-slack-card h3 {
-  margin: 0;
-  color: var(--text);
-  font-size: 16px;
-  line-height: 1.32;
-}
-
-.job-dday {
-  flex: 0 0 auto;
-  padding: 4px 8px;
-  border-radius: 999px;
-  color: #fff;
-  background: var(--red);
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.job-roles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 12px;
-}
-
-.job-roles span {
-  padding: 5px 8px;
-  border: 1px solid #d7e4ef;
-  border-radius: 999px;
-  color: #0b4c7b;
-  background: #f2f8fc;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.job-card-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 9px 12px;
-  border-top: 1px solid #ededed;
-  color: var(--muted);
-  background: var(--surface-soft);
-  font-size: 12px;
-}
-
-.job-card-footer a {
-  flex: 0 0 auto;
-  color: var(--blue);
-  font-weight: 900;
-  text-decoration: none;
-}
-
 .search-result-feed {
   display: grid;
 }
@@ -1780,10 +1632,6 @@ button.avatar-photo:hover {
 .analyzed-job-result:hover .message-actions {
   opacity: 1;
   transform: translateY(0);
-}
-
-.analyzed-job-result .job-slack-card {
-  max-width: 100%;
 }
 
 .analyze-url-reply .skeleton-message {
@@ -2425,11 +2273,6 @@ button.avatar-photo:hover {
   .message {
     padding-left: 12px;
     padding-right: 12px;
-  }
-
-  .job-card-footer {
-    align-items: flex-start;
-    flex-direction: column;
   }
 
   .later-category-grid {

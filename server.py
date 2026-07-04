@@ -29,6 +29,9 @@ ROLE_CATALOG_PATH = os.path.join(DATA_DIR, "job_roles.json")
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 MAX_UPLOAD_BYTES = 40 * 1024 * 1024
 MAX_OPENAI_TEXT_CHARS = 10485760
+PROFILE_OPENAI_TEXT_CHARS = 18000
+PROFILE_OPENAI_TIMEOUT = 18
+PROFILE_FAST_MAX_PAGES = 5
 OCR_MAX_PAGES = 20
 OCR_DPI = 160
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
@@ -477,6 +480,63 @@ PROFILE_ANALYSIS_PROMPT = """
 - 개인정보는 원문에 있는 경우에만 추출한다.
 """.strip()
 
+PROFILE_FAST_ANALYSIS_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "name",
+        "headline",
+        "summary",
+        "years_experience",
+        "current_or_recent_role",
+        "desired_roles",
+        "preferred_industries",
+        "skills",
+        "tools",
+        "soft_skills",
+        "projects",
+        "work_experiences",
+        "strengths",
+        "gaps",
+        "recommended_roles",
+        "evidence_phrases",
+        "chat_summary",
+        "chat_bullets",
+    ],
+    "properties": {
+        "name": {"type": "string"},
+        "headline": {"type": "string"},
+        "summary": {"type": "string"},
+        "years_experience": {"type": "number"},
+        "current_or_recent_role": {"type": "string"},
+        "desired_roles": {"type": "array", "items": {"type": "string"}},
+        "preferred_industries": {"type": "array", "items": {"type": "string"}},
+        "skills": {"type": "array", "items": {"type": "string"}},
+        "tools": {"type": "array", "items": {"type": "string"}},
+        "soft_skills": {"type": "array", "items": {"type": "string"}},
+        "projects": {"type": "array", "items": {"type": "string"}},
+        "work_experiences": {"type": "array", "items": {"type": "string"}},
+        "strengths": {"type": "array", "items": {"type": "string"}},
+        "gaps": {"type": "array", "items": {"type": "string"}},
+        "recommended_roles": {"type": "array", "items": {"type": "string"}},
+        "evidence_phrases": {"type": "array", "items": {"type": "string"}},
+        "chat_summary": {"type": "string"},
+        "chat_bullets": {"type": "array", "items": {"type": "string"}},
+    },
+}
+
+PROFILE_FAST_ANALYSIS_PROMPT = """
+너는 채용 매칭 서비스의 이력서/포트폴리오 분석가다.
+PDF에서 추출한 텍스트를 빠르게 읽고, 공고 매칭에 바로 쓸 핵심 신호만 JSON으로 정리한다.
+
+작성 원칙:
+- 반드시 입력 텍스트에 근거가 있는 내용만 쓴다.
+- 없는 정보는 빈 문자열, 빈 배열, 0으로 둔다.
+- skills/tools/projects/evidence_phrases는 공고 매칭에 도움이 되도록 최대한 많이 뽑되, 반복은 줄인다.
+- chat_summary와 chat_bullets는 Slack DM에서 사람이 남긴 짧은 분석 메모처럼 자연스럽게 쓴다.
+- 긴 설명보다 키워드와 근거 문구 추출을 우선한다.
+""".strip()
+
 SLACK_JOB_MESSAGE_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -865,13 +925,14 @@ def estimate_pdf_page_count(pdf_bytes):
     return max(1, len(matches))
 
 
-def extract_text_with_pypdf(pdf_bytes):
+def extract_text_with_pypdf(pdf_bytes, max_pages=None):
     from pypdf import PdfReader
 
     reader = PdfReader(io.BytesIO(pdf_bytes))
     pages = []
-    for page in reader.pages:
-        pages.append(page.extract_text() or "")
+    page_limit = len(reader.pages) if max_pages is None else min(len(reader.pages), max(int(max_pages), 1))
+    for index in range(page_limit):
+        pages.append(reader.pages[index].extract_text() or "")
     return normalize_extracted_text("\n\n".join(pages)), len(reader.pages)
 
 
@@ -1071,6 +1132,31 @@ def extract_pdf_text(pdf_bytes):
     }
 
 
+def extract_pdf_text_fast(pdf_bytes):
+    page_count = estimate_pdf_page_count(pdf_bytes)
+    max_pages = int(os.environ.get("PROFILE_FAST_MAX_PAGES", PROFILE_FAST_MAX_PAGES))
+    try:
+        text, pypdf_page_count = extract_text_with_pypdf(pdf_bytes, max_pages=max_pages)
+        page_count = pypdf_page_count or page_count
+        if is_useful_extracted_text(text):
+            return {
+                "text": text[:PROFILE_OPENAI_TEXT_CHARS],
+                "page_count": page_count,
+                "extractor": f"pypdf_fast_{max_pages}p",
+            }
+    except Exception:
+        pass
+
+    text = fallback_pdf_text(pdf_bytes)
+    if not is_useful_extracted_text(text):
+        text = ""
+    return {
+        "text": text[:PROFILE_OPENAI_TEXT_CHARS],
+        "page_count": page_count,
+        "extractor": "fallback_pdf_strings_fast" if text else "no_selectable_text_fast",
+    }
+
+
 def extract_response_output_text(response):
     if response.get("output_text"):
         return response["output_text"]
@@ -1165,21 +1251,25 @@ def call_openai_structured(instructions, user_payload, schema_name, schema, max_
 
 
 def call_openai_profile_analysis(extracted_text, document_type, source_document):
-    text_for_ai = extracted_text[:MAX_OPENAI_TEXT_CHARS]
+    text_for_ai = extracted_text[:PROFILE_OPENAI_TEXT_CHARS]
     prompt = {
         "document_type": document_type,
-        "source_document": source_document,
+        "source_document": {
+            "original_file_name": source_document.get("original_file_name", ""),
+            "page_count": source_document.get("page_count", 0),
+            "text_extractor": source_document.get("text_extractor", ""),
+        },
         "extracted_text": text_for_ai,
     }
     parsed, model = call_openai_structured(
-        PROFILE_ANALYSIS_PROMPT,
-        "다음 PDF 추출 텍스트를 분석해 JSON으로 변환하세요.\n\n" + json.dumps(prompt, ensure_ascii=False),
-        "resume_portfolio_profile",
-        PROFILE_ANALYSIS_SCHEMA,
-        max_output_tokens=11000,
-        timeout=90,
+        PROFILE_FAST_ANALYSIS_PROMPT,
+        prompt,
+        "resume_portfolio_profile_fast",
+        PROFILE_FAST_ANALYSIS_SCHEMA,
+        max_output_tokens=2200,
+        timeout=int(os.environ.get("PROFILE_OPENAI_TIMEOUT", PROFILE_OPENAI_TIMEOUT)),
     )
-    return parsed, model
+    return fast_profile_analysis_to_ai_result(parsed, extracted_text), model
 
 
 PROFILE_KEYWORD_STOPWORDS = {
@@ -1394,6 +1484,186 @@ def merge_keyword_inventory(*inventories):
         limit=keyword_field_limit("all_keywords"),
     )
     return merged
+
+
+def fast_profile_items(payload, key, limit=20, max_length=90):
+    return merge_keywords((payload or {}).get(key, []), limit=limit, max_length=max_length)
+
+
+def fast_profile_analysis_to_ai_result(parsed, extracted_text):
+    parsed = parsed if isinstance(parsed, dict) else {}
+    text_inventory = keyword_inventory_from_text(extracted_text)
+    ai_inventory = keyword_inventory_empty()
+    ai_inventory["role_keywords"] = merge_keywords(
+        parsed.get("desired_roles", []),
+        parsed.get("recommended_roles", []),
+        parsed.get("current_or_recent_role", ""),
+        limit=keyword_field_limit("role_keywords"),
+    )
+    ai_inventory["industry_keywords"] = merge_keywords(
+        parsed.get("preferred_industries", []),
+        limit=keyword_field_limit("industry_keywords"),
+    )
+    ai_inventory["technical_keywords"] = merge_keywords(
+        parsed.get("skills", []),
+        limit=keyword_field_limit("technical_keywords"),
+    )
+    ai_inventory["tool_keywords"] = merge_keywords(
+        parsed.get("tools", []),
+        limit=keyword_field_limit("tool_keywords"),
+    )
+    ai_inventory["soft_skill_keywords"] = merge_keywords(
+        parsed.get("soft_skills", []),
+        limit=keyword_field_limit("soft_skill_keywords"),
+    )
+    ai_inventory["project_keywords"] = merge_keywords(
+        parsed.get("projects", []),
+        limit=keyword_field_limit("project_keywords"),
+    )
+    ai_inventory["achievement_keywords"] = merge_keywords(
+        parsed.get("strengths", []),
+        limit=keyword_field_limit("achievement_keywords"),
+    )
+    ai_inventory["negative_or_gap_keywords"] = merge_keywords(
+        parsed.get("gaps", []),
+        limit=keyword_field_limit("negative_or_gap_keywords"),
+    )
+    ai_inventory["evidence_phrases"] = merge_keywords(
+        parsed.get("evidence_phrases", []),
+        limit=keyword_field_limit("evidence_phrases"),
+        max_length=160,
+    )
+    inventory = merge_keyword_inventory(ai_inventory, text_inventory)
+    core_keywords = merge_keywords(
+        parsed.get("desired_roles", []),
+        parsed.get("recommended_roles", []),
+        parsed.get("skills", []),
+        parsed.get("tools", []),
+        parsed.get("projects", []),
+        inventory.get("all_keywords", []),
+        limit=90,
+    )
+    skills = fast_profile_items(parsed, "skills", limit=48)
+    tools = fast_profile_items(parsed, "tools", limit=32)
+    soft_skills = fast_profile_items(parsed, "soft_skills", limit=24)
+    current_role = clean_text(parsed.get("current_or_recent_role"))
+    desired_roles = fast_profile_items(parsed, "desired_roles", limit=12)
+    projects = fast_profile_items(parsed, "projects", limit=8, max_length=120)
+    work_items = fast_profile_items(parsed, "work_experiences", limit=8, max_length=140)
+    strengths = fast_profile_items(parsed, "strengths", limit=8, max_length=140)
+    gaps = fast_profile_items(parsed, "gaps", limit=6, max_length=120)
+    recommended_roles = fast_profile_items(parsed, "recommended_roles", limit=8)
+
+    return {
+        "candidate_profile": {
+            "personal_info": {
+                "name": clean_text(parsed.get("name")),
+                "email": "",
+                "phone": "",
+                "location": "",
+                "links": {"portfolio": "", "github": "", "linkedin": "", "blog": "", "other": []},
+            },
+            "headline": clean_text(parsed.get("headline")) or (current_role or "PDF 기반 프로필"),
+            "summary": clean_text(parsed.get("summary")) or clean_text(parsed.get("chat_summary")) or "PDF 텍스트 기준으로 공고 매칭용 신호를 정리했습니다.",
+            "career": {
+                "total_years_of_experience": float(parsed.get("years_experience") or 0),
+                "seniority_level": "unknown",
+                "current_or_recent_role": current_role,
+                "desired_roles": desired_roles,
+                "preferred_industries": fast_profile_items(parsed, "preferred_industries", limit=12),
+            },
+            "skills": {
+                "technical_skills": [
+                    {"name": item, "category": "skill", "level": "unknown", "evidence": ""}
+                    for item in skills
+                ],
+                "tools": [
+                    {"name": item, "category": "tool", "level": "unknown", "evidence": ""}
+                    for item in tools
+                ],
+                "soft_skills": [
+                    {"name": item, "evidence": ""}
+                    for item in soft_skills
+                ],
+                "languages": [],
+            },
+            "work_experiences": [
+                {
+                    "company": "",
+                    "position": current_role,
+                    "department": "",
+                    "employment_type": "",
+                    "start_date": "",
+                    "end_date": "",
+                    "is_current": False,
+                    "responsibilities": [item],
+                    "achievements": [],
+                    "tech_stack": skills[:8],
+                    "evidence": item,
+                }
+                for item in work_items
+            ],
+            "projects": [
+                {
+                    "name": item[:60],
+                    "role": current_role or (desired_roles[0] if desired_roles else ""),
+                    "start_date": "",
+                    "end_date": "",
+                    "description": item,
+                    "problem": "",
+                    "solution": "",
+                    "impact": "",
+                    "contribution": item,
+                    "tech_stack": skills[:8],
+                    "links": [],
+                    "evidence": item,
+                }
+                for item in projects
+            ],
+            "education": [],
+            "certifications": [],
+            "awards": [],
+        },
+        "matching_profile": {
+            "primary_job_categories": desired_roles[:6],
+            "recommended_job_titles": recommended_roles[:8],
+            "core_keywords": core_keywords,
+            "keyword_inventory": inventory,
+            "strong_match_signals": strengths,
+            "weak_match_signals": gaps,
+            "preferred_work_style": {"remote": "", "employment_type": [], "location": []},
+        },
+        "ai_analysis_result": {
+            "overall_summary": clean_text(parsed.get("summary")) or clean_text(parsed.get("chat_summary")),
+            "candidate_type": "PDF 기반 빠른 분석",
+            "career_level_assessment": {
+                "level": "unknown",
+                "reason": "PDF 핵심 텍스트와 OpenAI 경량 분석 결과를 기준으로 판단했습니다.",
+            },
+            "strengths": [
+                {"title": item[:36], "description": item, "evidence": item}
+                for item in strengths
+            ],
+            "risks_or_gaps": [
+                {"title": item[:36], "description": item, "severity": "medium"}
+                for item in gaps
+            ],
+            "recommended_roles": [
+                {"role": item, "reason": "PDF에서 확인된 역할/스킬 신호와 연결됩니다.", "confidence": 0.72}
+                for item in recommended_roles
+            ],
+            "improvement_suggestions": gaps[:4],
+            "chat_display_message": {
+                "title": "프로필분석이",
+                "summary": clean_text(parsed.get("chat_summary")) or "PDF를 빠르게 읽고 공고 매칭에 쓸 핵심 키워드를 정리했어요.",
+                "bullets": fast_profile_items(parsed, "chat_bullets", limit=5, max_length=120),
+            },
+            "confidence": {
+                "overall": 0.72 if extracted_text else 0.25,
+                "missing_information": gaps[:5],
+            },
+        },
+    }
 
 
 def derive_inventory_from_ai_result(ai_result):
@@ -1641,7 +1911,7 @@ def analyze_profile_pdf_upload(headers, body, state=None):
     if not pdf_bytes.startswith(b"%PDF-"):
         raise ValueError("Uploaded file is not a valid PDF")
 
-    extracted = extract_pdf_text(pdf_bytes)
+    extracted = extract_pdf_text_fast(pdf_bytes)
     extracted_text = extracted.get("text", "")
     source_document = {
         "document_id": f"profile_pdf_{int(time.time())}",
@@ -1652,8 +1922,8 @@ def analyze_profile_pdf_upload(headers, body, state=None):
         "page_count": extracted.get("page_count") or estimate_pdf_page_count(pdf_bytes),
         "text_extractor": extracted.get("extractor") or "unknown",
         "extracted_text_char_count": len(extracted_text),
-        "sent_to_ai_char_count": min(len(extracted_text), MAX_OPENAI_TEXT_CHARS),
-        "truncated_for_ai": len(extracted_text) > MAX_OPENAI_TEXT_CHARS,
+        "sent_to_ai_char_count": min(len(extracted_text), PROFILE_OPENAI_TEXT_CHARS),
+        "truncated_for_ai": len(extracted_text) > PROFILE_OPENAI_TEXT_CHARS,
         "language": ["ko", "en"],
         "parse_status": "success" if extracted_text else "no_text",
     }
