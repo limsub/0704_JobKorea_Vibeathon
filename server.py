@@ -33,14 +33,14 @@ OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 DEFAULT_OPENAI_TIMEOUT = 60
 
-DEFAULT_ENABLED_CHANNEL_IDS = ["pm", "ios", "server", "frontend", "data"]
+DEFAULT_ENABLED_CHANNEL_IDS = ["pm"]
 
 DIRECT_CHANNEL = {
     "id": "direct",
-    "name": "direct-parsing",
+    "name": "URL 가져오기",
     "query": "",
-    "subtitle": "채용공고 URL을 붙여넣으면 thread로 파싱",
-    "bookmarks": ["URL parser", "Raw posting", "Thread"],
+    "subtitle": "채용공고 URL을 붙여넣으면 메시지로 정리합니다.",
+    "bookmarks": [],
     "source": "system",
     "protected": True,
 }
@@ -619,8 +619,7 @@ def all_job_channels(state=None):
 def enabled_channels(state=None):
     state = state or read_state()
     enabled_ids = set(state.get("enabledChannelIds", DEFAULT_ENABLED_CHANNEL_IDS))
-    channels = [channel for channel in all_job_channels(state) if channel["id"] in enabled_ids]
-    return channels + [dict(DIRECT_CHANNEL)]
+    return [channel for channel in all_job_channels(state) if channel["id"] in enabled_ids]
 
 
 def find_channel(channel_id, state=None):

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>JobKorea Vibe</title>
-    <link rel="stylesheet" href="./styles.css?v=20260704-ai-slack" />
+    <link rel="stylesheet" href="./styles.css?v=20260704-ux-cleanup" />
   </head>
   <body>
     <div class="app-shell">
@@ -20,7 +20,6 @@
           <kbd>⌘K</kbd>
         </button>
         <div class="topbar-actions">
-          <button class="status-chip"><span class="live-dot"></span> Huddle</button>
           <button class="icon-button" aria-label="Help">?</button>
           <button class="avatar avatar-small" aria-label="Profile">S</button>
         </div>
@@ -52,27 +51,12 @@
         <section class="workspace-card">
           <div>
             <h1>JobKorea Vibe</h1>
-            <p><span class="presence-dot"></span> ngrok share ready</p>
+            <p><span class="presence-dot"></span> 채용공고 큐레이션</p>
           </div>
           <button class="icon-button light" aria-label="New message">✎</button>
         </section>
 
-        <section class="sidebar-section compact">
-          <button class="sidebar-row">
-            <span class="row-icon">▣</span>
-            <span>Threads</span>
-            <span class="sidebar-count">3</span>
-          </button>
-          <button class="sidebar-row">
-            <span class="row-icon">@</span>
-            <span>Mentions & reactions</span>
-            <span class="sidebar-count urgent">2</span>
-          </button>
-          <button class="sidebar-row">
-            <span class="row-icon">⌁</span>
-            <span>Drafts & sent</span>
-          </button>
-        </section>
+        <section class="sidebar-section compact" hidden></section>
 
         <section class="sidebar-section">
           <button class="section-title" data-collapse="channels">
@@ -97,11 +81,8 @@
             <button class="channel-title" id="channelTitle"># general</button>
             <p id="channelSubtitle">Company-wide announcements and work-based matters</p>
           </div>
-          <div class="channel-actions">
-            <button class="huddle-button"><span class="live-dot"></span> Start huddle</button>
-            <button class="pill-button"><span>👥</span><span id="memberCount">24</span></button>
-            <button class="icon-button surface" aria-label="Canvas">▤</button>
-            <button class="icon-button surface" aria-label="More">⋯</button>
+          <div class="channel-actions" aria-hidden="true">
+            <span id="memberCount" hidden>0</span>
           </div>
         </div>
 
@@ -187,6 +168,6 @@
       </div>
     </div>
 
-    <script src="./app.js?v=20260704-ai-slack"></script>
+    <script src="./app.js?v=20260704-ux-cleanup"></script>
   </body>
 </html>

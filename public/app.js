@@ -1,8 +1,9 @@
 const API = "";
 const MAX_PROFILE_PDF_BYTES = 40 * 1024 * 1024;
 const LOCAL_STATE_KEY = "slezzuk_local_state_v1";
+const LOCAL_STATE_VERSION = 2;
 
-const DEFAULT_ENABLED_CHANNEL_IDS = ["pm", "ios", "server", "frontend", "data"];
+const DEFAULT_ENABLED_CHANNEL_IDS = ["pm"];
 const DEFAULT_PROFILE = {
   resume: "",
   portfolio: "",
@@ -24,10 +25,10 @@ const DEFAULT_PROFILE_ANALYSIS = {
 };
 const DIRECT_CHANNEL = {
   id: "direct",
-  name: "direct-parsing",
+  name: "URL 가져오기",
   query: "",
-  subtitle: "채용공고 URL을 붙여넣으면 thread로 파싱",
-  bookmarks: ["URL parser", "Raw posting", "Thread"],
+  subtitle: "채용공고 URL을 붙여넣으면 메시지로 정리합니다.",
+  bookmarks: [],
   source: "system",
   protected: true,
 };
@@ -48,6 +49,8 @@ const state = {
   activeLaterReaction: "watch",
   jobs: { direct: [] },
   savedJobs: {},
+  openJobDmIds: [],
+  openedJobDms: {},
   channelCatalog: [],
   enabledChannelIds: [],
   customChannels: [],
@@ -150,13 +153,15 @@ function clone(value) {
 
 function defaultLocalState() {
   return {
-    version: 1,
+    version: LOCAL_STATE_VERSION,
     classifications: {},
     notes: {},
     profile: clone(DEFAULT_PROFILE),
     profileAnalysis: clone(DEFAULT_PROFILE_ANALYSIS),
     directParsedJobs: [],
     savedJobs: {},
+    openJobDmIds: [],
+    openedJobDms: {},
     enabledChannelIds: [...DEFAULT_ENABLED_CHANNEL_IDS],
     customChannels: [],
   };
@@ -167,6 +172,12 @@ function readLocalState() {
     const raw = localStorage.getItem(LOCAL_STATE_KEY);
     if (!raw) return defaultLocalState();
     const parsed = JSON.parse(raw);
+    if ((parsed.version || 1) < LOCAL_STATE_VERSION) {
+      parsed.version = LOCAL_STATE_VERSION;
+      parsed.enabledChannelIds = [...DEFAULT_ENABLED_CHANNEL_IDS];
+      parsed.openJobDmIds = [];
+      parsed.openedJobDms = {};
+    }
     return { ...defaultLocalState(), ...parsed };
   } catch (err) {
     console.warn("Failed to read local state", err);
@@ -176,13 +187,15 @@ function readLocalState() {
 
 function localStateSnapshot() {
   return {
-    version: 1,
+    version: LOCAL_STATE_VERSION,
     classifications: normalizeClassifications(state.classifications),
     notes: state.notes,
     profile: state.profile,
     profileAnalysis: state.profileAnalysis,
     directParsedJobs: compactJobsForStorage(state.jobs.direct || []),
     savedJobs: compactSavedJobsForStorage(state.savedJobs),
+    openJobDmIds: state.openJobDmIds,
+    openedJobDms: compactSavedJobsForStorage(state.openedJobDms),
     enabledChannelIds: state.enabledChannelIds,
     customChannels: state.customChannels,
   };
@@ -270,6 +283,9 @@ function savedJobIds() {
 
 function knownJobMap() {
   const jobs = new Map();
+  Object.values(state.openedJobDms || {}).forEach((job) => {
+    if (job?.id != null) jobs.set(String(job.id), job);
+  });
   Object.values(state.savedJobs || {}).forEach((job) => {
     if (job?.id != null) jobs.set(String(job.id), job);
   });
@@ -282,6 +298,13 @@ function knownJobMap() {
 function rememberSavedJob(job) {
   if (job?.id == null) return;
   state.savedJobs[String(job.id)] = compactJobsForStorage([job])[0];
+}
+
+function rememberOpenJobDm(job) {
+  if (job?.id == null) return;
+  const jobId = String(job.id);
+  state.openedJobDms[jobId] = compactJobsForStorage([job])[0];
+  state.openJobDmIds = [jobId, ...state.openJobDmIds.filter((id) => String(id) !== jobId)].slice(0, 12);
 }
 
 function reconcileSavedJobs() {
@@ -298,7 +321,6 @@ function reconcileSavedJobs() {
 function rebuildChannels() {
   const enabled = new Set(state.enabledChannelIds);
   channels = allLocalChannels().filter((channel) => enabled.has(channel.id));
-  channels.push({ ...DIRECT_CHANNEL });
   channels.forEach((channel) => {
     if (!state.jobs[channel.id]) state.jobs[channel.id] = [];
   });
@@ -398,7 +420,7 @@ function jobSearchText(job) {
 function jobMessageText(job) {
   const slack = jobSlackMessages(job);
   if (slack.message_title || slack.message_body) return [slack.message_title, slack.message_body].filter(Boolean).join(" ");
-  return `${jobCompany(job)} 채용공고를 불러왔습니다. Slack 메시지 변환 결과가 없으면 원문 JSON을 확인해 주세요.`;
+  return `${jobCompany(job)} 채용공고를 불러왔습니다. 세부 내용은 스레드에서 확인해 주세요.`;
 }
 
 async function boot() {
@@ -409,8 +431,21 @@ async function boot() {
   }
   if (window.__slezzukPendingMode === "later") state.activeMode = "later";
   render();
-  await Promise.all(channels.filter((channel) => channel.id !== "direct").map((channel) => loadJobs(channel.id)));
+  const activeChannelId = state.activeMode === "channel" ? state.activeChannel : channels[0]?.id;
+  if (activeChannelId && activeChannelId !== "direct") {
+    await loadJobs(activeChannelId);
+  }
   render();
+  channels
+    .filter((channel) => channel.id !== "direct" && channel.id !== activeChannelId)
+    .forEach((channel) => {
+      loadJobs(channel.id)
+        .then(() => {
+          if (state.activeChannel === channel.id || state.activeMode === "later") renderPreservingMessageScroll();
+          else renderSidebar();
+        })
+        .catch((err) => console.warn("Failed to load background channel", channel.id, err));
+    });
 }
 
 async function loadState() {
@@ -421,6 +456,8 @@ async function loadState() {
   state.profileAnalysis = { ...clone(DEFAULT_PROFILE_ANALYSIS), ...(data.profileAnalysis || {}) };
   state.jobs.direct = data.directParsedJobs || [];
   state.savedJobs = data.savedJobs || {};
+  state.openJobDmIds = (data.openJobDmIds || []).map(String).slice(0, 12);
+  state.openedJobDms = data.openedJobDms || {};
   state.enabledChannelIds = data.enabledChannelIds || [...DEFAULT_ENABLED_CHANNEL_IDS];
   state.customChannels = (data.customChannels || []).map((channel) => normalizeLocalChannel(channel, "custom"));
   reconcileSavedJobs();
@@ -481,14 +518,17 @@ function renderSidebar() {
 
   const compactSection = document.querySelector(".sidebar-section.compact");
   if (compactSection) {
-    compactSection.innerHTML = state.activeMode === "later" ? renderLaterSidebarRows() : renderDefaultSidebarRows();
+    const compactRows = state.activeMode === "later" ? renderLaterSidebarRows() : renderDefaultSidebarRows();
+    compactSection.innerHTML = compactRows;
+    compactSection.hidden = !compactRows;
   }
 
-  const jobDms = Object.values(state.jobs).flat().slice(0, 12).map((job) => ({
-    id: `job:${job.id}`,
-    name: jobCompany(job),
-    job,
-  }));
+  const jobs = knownJobMap();
+  state.openJobDmIds = state.openJobDmIds.filter((jobId) => jobs.has(String(jobId)));
+  const jobDms = state.openJobDmIds.map((jobId) => {
+    const job = jobs.get(String(jobId));
+    return { id: `job:${job.id}`, name: jobCompany(job), job };
+  });
   const fixed = [
     { id: "search", name: "Search", icon: "⌕" },
     { id: "profile", name: "Resume & Portfolio", icon: "📎" },
@@ -511,22 +551,7 @@ function renderSidebar() {
 }
 
 function renderDefaultSidebarRows() {
-  return `
-    <button class="sidebar-row">
-      <span class="row-icon">▣</span>
-      <span class="row-label">Threads</span>
-      <span class="sidebar-count">3</span>
-    </button>
-    <button class="sidebar-row">
-      <span class="row-icon">@</span>
-      <span class="row-label">Mentions & reactions</span>
-      <span class="sidebar-count urgent">2</span>
-    </button>
-    <button class="sidebar-row">
-      <span class="row-icon">⌁</span>
-      <span class="row-label">Drafts & sent</span>
-    </button>
-  `;
+  return "";
 }
 
 function renderLaterSidebarRows() {
@@ -573,8 +598,8 @@ function renderChannel(options = {}) {
   const jobs = state.jobs[channel.id] || [];
   channelTitle.textContent = `# ${channel.name}`;
   channelSubtitle.textContent = channel.subtitle;
-  memberCount.textContent = jobs.length;
-  bookmarks.innerHTML = (channel.bookmarks || []).map((item) => `<button class="bookmark">${escapeHtml(item)}</button>`).join("");
+  if (memberCount) memberCount.textContent = jobs.length;
+  bookmarks.innerHTML = "";
   messageInput.placeholder = channel.id === "direct" ? "채용공고 URL 붙여넣기" : `Message #${channel.name}`;
 
   if (channel.id === "direct") {
@@ -588,11 +613,11 @@ function renderChannel(options = {}) {
   }
 
   messageList.innerHTML = `
-    ${channelIntro(channel, "JobKorea 크롤링 결과를 Slack 공유 메시지로 변환하고, 원문 JSON과 스레드 코멘트를 함께 보관합니다.")}
+    ${channelIntro(channel, "관심 직무의 채용공고를 Slack 메시지처럼 모아봤어요. 자세한 내용은 공고 스레드에서 확인할 수 있습니다.")}
     <div class="job-toolbar">
       <button data-refresh="${channel.id}">JobKorea 새로고침</button>
     </div>
-    <div class="day-divider"><span>${channel.query} results</span></div>
+    <div class="day-divider"><span>채용공고</span></div>
     ${jobs.length ? bottomAnchoredItems(jobs).map(renderJobMessage).join("") : emptyBlock("공고를 불러오는 중입니다.")}
   `;
   if (!options.preserveMessageScroll) scrollToBottom(messageList);
@@ -605,7 +630,7 @@ function renderLater(options = {}) {
   state.activeLaterReaction = activeGroup.reaction.key;
   channelTitle.textContent = "나중에 보기";
   channelSubtitle.textContent = "이모지로 저장한 공고를 태그별로 모아봅니다.";
-  memberCount.textContent = total;
+  if (memberCount) memberCount.textContent = total;
   bookmarks.innerHTML = "";
   messageInput.placeholder = "저장한 공고의 스레드에서 메모를 남길 수 있습니다.";
 
@@ -722,11 +747,6 @@ function channelIntro(channel, text) {
       <div class="intro-icon">#</div>
       <h2>${channel.name}</h2>
       <p>${text}</p>
-      <div class="intro-meta">
-        <span>JobKorea source</span>
-        <span>Local notes</span>
-        <span>Local matching</span>
-      </div>
     </section>
   `;
 }
@@ -781,8 +801,8 @@ function renderJobMessage(job) {
           `).join("")}
         </div>
         <button class="reply-summary" data-thread-job="${escapeHtml(jobId)}">
-          <span>${(state.notes[job.id] || []).length} notes</span>
-          <strong>View thread + AI match</strong>
+          <span>${(state.notes[job.id] || []).length}개 메모</span>
+          <strong>스레드에서 상세/매칭 보기</strong>
         </button>
       </div>
       <div class="message-actions">
@@ -796,18 +816,26 @@ function renderJobMessage(job) {
 
 function renderJobCard(job) {
   const url = jobUrl(job);
+  const slack = jobSlackMessages(job);
+  const keyPoints = (slack.key_points?.length ? slack.key_points : jobKeywords(job)).slice(0, 6);
   return `
-    <div class="job-json-card">
-      <div class="json-card-head">
+    <div class="job-slack-card">
+      <div class="job-card-head">
         <div>
-          <span class="job-source">${escapeHtml(jobSource(job))}</span>
+          <span class="job-source">${escapeHtml(jobCompany(job))}</span>
           <h3>${escapeHtml(jobTitle(job))}</h3>
         </div>
         <span class="job-dday">${escapeHtml(jobCareer(job))}</span>
       </div>
-      <pre>${escapeHtml(JSON.stringify(job, null, 2))}</pre>
+      <div class="job-meta-grid">
+        <span><strong>회사</strong>${escapeHtml(jobCompany(job))}</span>
+        <span><strong>지역</strong>${escapeHtml(jobLocation(job))}</span>
+        <span><strong>기간</strong>${escapeHtml(jobPeriod(job))}</span>
+        <span><strong>출처</strong>${escapeHtml(jobSource(job))}</span>
+      </div>
+      ${keyPoints.length ? `<div class="job-roles">${keyPoints.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
       <div class="job-card-footer">
-        <span>${escapeHtml(url)}</span>
+        <span>${escapeHtml(slack.thread_summary || "스레드에서 상세 내용과 매칭을 확인하세요.")}</span>
         <a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">원문 열기</a>
       </div>
     </div>
@@ -842,32 +870,26 @@ function renderDm(options = {}) {
 
 function renderAiSearchDm() {
   channelTitle.textContent = "검색 봇";
-  channelSubtitle.textContent = "자연어 입력 → 로컬 키워드 파싱 → JobKorea 크롤링 → 근거와 결과 출력";
-  memberCount.textContent = "bot";
-  bookmarks.innerHTML = `<button class="bookmark">local intent</button><button class="bookmark">crawler trace</button><button class="bookmark">JobKorea</button>`;
+  channelSubtitle.textContent = "원하는 회사나 직무를 말하면 관련 공고를 찾아드립니다.";
+  if (memberCount) memberCount.textContent = "bot";
+  bookmarks.innerHTML = "";
   messageInput.placeholder = "예: LG전자에서 SW 개발 직군 공고 보여줘";
   messageList.innerHTML = `
     <section class="channel-intro">
       <div class="intro-icon">⌕</div>
       <h2>검색 봇</h2>
-      <p>입력 문장을 로컬에서 어떻게 해석했는지, 어떤 URL을 크롤링했는지, 어떤 공고를 가져왔는지 답장에 표시합니다.</p>
-      <div class="intro-meta">
-        <span>OpenAI message transform</span>
-        <span>local intent</span>
-        <span>JobKorea crawl</span>
-      </div>
+      <p>회사명, 직무, 지역, 경력 조건을 편하게 적어보세요. 어울리는 공고를 찾아 메시지로 정리해드립니다.</p>
     </section>
     <div id="aiSearchResults">
       ${state.searchBotMessages.length ? topAnchoredItems(state.searchBotMessages).map(renderAiSearchTurn).join("") : emptyBlock("원하는 공고를 자연어로 입력해보세요.")}
     </div>
   `;
-  renderAiSearchThread();
 }
 
 function renderProfileDm() {
   channelTitle.textContent = "Resume & Portfolio";
   channelSubtitle.textContent = "PDF 업로드 → 텍스트 추출 → ChatGPT API 분석 → JSON 저장";
-  memberCount.textContent = "me";
+  if (memberCount) memberCount.textContent = "me";
   bookmarks.innerHTML = `<button class="bookmark">PDF only</button><button class="bookmark">one AI run</button><button class="bookmark">JSON output</button>`;
   messageInput.placeholder = "PDF 업로드는 위 패널에서만 가능합니다.";
   messageList.innerHTML = renderProfileUploadSurface();
@@ -1002,28 +1024,27 @@ function renderExtractedTextResult(analysis, extractedText) {
 
 function renderSearchDm() {
   channelTitle.textContent = "Search";
-  channelSubtitle.textContent = "자연어 입력 → 로컬 키워드 파싱 → JobKorea 크롤링 → 공고 10개 출력";
-  memberCount.textContent = "search";
-  bookmarks.innerHTML = `<button class="bookmark">local intent</button><button class="bookmark">JobKorea crawl</button><button class="bookmark">10 results</button>`;
+  channelSubtitle.textContent = "회사명이나 직무를 입력하면 관련 공고를 찾아드립니다.";
+  if (memberCount) memberCount.textContent = "search";
+  bookmarks.innerHTML = "";
   messageInput.placeholder = "LG전자 SW 개발자 채용 공고 보여줘";
   messageList.innerHTML = `
     <section class="channel-intro">
       <div class="intro-icon">⌕</div>
       <h2>Search</h2>
-      <p>검색 문장을 보내면 로컬 서버가 핵심 키워드를 뽑아 JobKorea에서 검색하고, 결과를 DM 답장처럼 보여줍니다.</p>
+      <p>찾고 싶은 회사, 직무, 지역을 한 문장으로 보내면 관련 공고를 정리해서 보여드립니다.</p>
     </section>
     <div id="searchDmResults">
       ${state.searchBotMessages.length ? topAnchoredItems(state.searchBotMessages).map(renderSearchTurn).join("") : emptyBlock("원하는 공고를 자연어로 입력해보세요.")}
     </div>
   `;
-  renderSearchThread();
 }
 
 function renderJobDm(job) {
   if (!job) return;
   channelTitle.textContent = jobCompany(job);
   channelSubtitle.textContent = "공고 담당자 DM처럼 쓰는 개인 기록 공간";
-  memberCount.textContent = "DM";
+  if (memberCount) memberCount.textContent = "DM";
   bookmarks.innerHTML = `<button class="bookmark">자소서 초안</button><button class="bookmark">면접 메모</button>`;
   messageInput.placeholder = "이 공고에 대한 메모나 자소서 초안을 남기기";
   const notes = state.notes[job.id] || [];
@@ -1082,14 +1103,14 @@ async function renderThread(job) {
       : "DM";
   threadChannel.textContent = `# ${threadScope}`;
   threadBody.innerHTML = `
-    <div class="thread-context"><span>AI matching</span><strong>계산 중</strong></div>
+    <div class="thread-context"><span>매칭 분석</span><strong>계산 중</strong></div>
     ${renderJobMessage(job)}
     ${renderSlackThreadComment(job)}
-    <div class="day-divider"><span>Parsed details</span></div>
+    <div class="day-divider"><span>공고 상세</span></div>
     ${(job.details || defaultDetails(job)).map((detail) => `
       <article class="message compact-message">
         <div class="message-avatar" style="background:#1264a3">JK</div>
-        <div><div class="message-meta"><span class="message-name">Local parser</span><span class="message-time">detail</span></div>
+        <div><div class="message-meta"><span class="message-name">공고 정보</span></div>
         <div class="message-text">${escapeHtml(detail)}</div></div>
       </article>
     `).join("")}
@@ -1135,27 +1156,13 @@ function renderProfileThread() {
   `;
 }
 
-function renderSearchThread() {
-  threadChannel.textContent = "# search";
-  threadBody.innerHTML = `
-    <div class="thread-context"><span>검색 방식</span><strong>local parser + crawler</strong></div>
-    <div class="empty-thread">예: “NC 채용 공고 보여줘”, “LG전자 SW 개발자 채용 공고 보여줘”</div>
-  `;
-}
-
-function renderAiSearchThread() {
-  threadChannel.textContent = "# search-bot";
-  threadBody.innerHTML = `
-    <div class="thread-context"><span>검증 포인트</span><strong>parser + crawler</strong></div>
-    <div class="empty-thread">답장 카드의 trace에서 parser mode, 해석된 query, crawl URL, 결과 수를 확인하세요.</div>
-  `;
-}
-
 function renderAiSearchTurn(turn) {
   return renderSearchTurn(turn);
 }
 
 function renderSearchTurn(turn) {
+  const jobs = turn.response.jobs || [];
+  const running = turn.response.aiTrace?.mode === "running";
   return `
     <article class="message">
       <div class="message-avatar" style="background:#007a5a">ME</div>
@@ -1167,32 +1174,14 @@ function renderSearchTurn(turn) {
     <article class="message">
       <div class="message-avatar" style="background:#1264a3">JK</div>
       <div class="message-content">
-        <div class="message-meta"><span class="message-name">Search</span><span class="message-time">${turn.response.aiTrace.mode}</span></div>
-        <div class="message-text">${escapeHtml(turn.response.answer)}</div>
-        ${renderAiTrace(turn.response)}
-        <div class="day-divider"><span>crawled jobs</span></div>
-        ${topAnchoredItems(turn.response.jobs || []).map(renderJobMessage).join("") || emptyBlock("검색 결과가 없습니다.")}
+        <div class="message-meta"><span class="message-name">Search</span><span class="message-time">${running ? "검색 중" : `${jobs.length} results`}</span></div>
+        <div class="message-text">${escapeHtml(running ? "관련 공고를 찾는 중입니다." : jobs.length ? `${jobs.length}개의 관련 공고를 찾았어요.` : "조건에 맞는 공고를 찾지 못했어요. 회사명이나 직무명을 조금 더 넓게 입력해보세요.")}</div>
+        ${running ? "" : `
+          <div class="day-divider"><span>검색 결과</span></div>
+          ${topAnchoredItems(jobs).map(renderJobMessage).join("") || emptyBlock("검색 결과가 없습니다.")}
+        `}
       </div>
     </article>
-  `;
-}
-
-function renderAiTrace(response) {
-  const intent = response.intent || {};
-  const trace = response.aiTrace || {};
-  return `
-    <section class="ai-trace">
-      <div class="trace-grid">
-        <span><strong>parser mode</strong>${escapeHtml(trace.mode || "-")}</span>
-        <span><strong>query</strong>${escapeHtml(intent.query || "-")}</span>
-        <span><strong>company</strong>${escapeHtml(intent.company || "-")}</span>
-        <span><strong>role</strong>${escapeHtml(intent.role || "-")}</span>
-        <span><strong>results</strong>${trace.resultCount ?? 0}</span>
-      </div>
-      <a href="${trace.crawlUrl}" target="_blank" rel="noreferrer">${escapeHtml(trace.crawlUrl || "")}</a>
-      <ol>${(trace.steps || []).map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>
-      ${response.topDetail ? `<p><strong>Top detail:</strong> ${escapeHtml((response.topDetail.details || [response.topDetail.title || ""])[0] || response.topDetail.error || "")}</p>` : ""}
-    </section>
   `;
 }
 
@@ -1203,9 +1192,6 @@ function defaultDetails(job) {
     `접수기간: ${jobPeriod(job)}`,
     `근무지: ${jobLocation(job)}`,
     `키워드: ${jobKeywords(job).join(", ") || "상세 공고 참고"}`,
-    `slack_messages.message_title: ${jobSlackMessages(job).message_title || "(empty)"}`,
-    `slack_messages.message_body: ${jobSlackMessages(job).message_body || "(empty)"}`,
-    `slack_messages.thread_comment: ${jobSlackMessages(job).thread_comment || "(empty)"}`,
   ];
 }
 
@@ -1223,7 +1209,6 @@ function renderMatch(match) {
         <ul>${(match.risks || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
         <strong>다음 행동</strong>
         <ul>${(match.nextActions || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-        <small>${escapeHtml(match.aiMode || "local")}</small>
       </div>
     </section>
   `;
@@ -1252,7 +1237,7 @@ async function submitComposer(text) {
       time: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
       message: text,
       response: {
-        answer: "검색 봇이 로컬에서 의도를 해석하고 JobKorea를 크롤링하는 중입니다.",
+        answer: "관련 공고를 찾는 중입니다.",
         aiTrace: { mode: "running", resultCount: 0, steps: ["request sent"] },
         jobs: [],
       },
@@ -1270,7 +1255,7 @@ async function submitComposer(text) {
       time: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
       message: text,
       response: {
-        answer: "Search가 문장을 해석하고 JobKorea를 크롤링하는 중입니다.",
+        answer: "관련 공고를 찾는 중입니다.",
         aiTrace: { mode: "running", resultCount: 0, steps: ["request sent"] },
         jobs: [],
       },
@@ -1528,9 +1513,12 @@ document.addEventListener("click", async (event) => {
 
   const openDm = event.target.closest("[data-open-dm]");
   if (openDm) {
+    const job = findJob(openDm.dataset.openDm);
+    if (job) rememberOpenJobDm(job);
     state.activeMode = "dm";
     state.activeDm = `job:${openDm.dataset.openDm}`;
     closeThreadPanel();
+    saveLocalState();
     render();
     return;
   }
