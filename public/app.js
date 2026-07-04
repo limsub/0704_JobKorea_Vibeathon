@@ -1429,7 +1429,7 @@ function renderJobDm(job) {
     ${renderJobDmBriefing(job)}
     ${renderJobDmPrepReply(job)}
     <div class="day-divider"><span>AI matching</span></div>
-    ${shouldShowMatch ? (cachedMatch ? renderMatch(cachedMatch) : renderMatchSkeleton()) : renderNoProfileMatchReply(job)}
+    ${shouldShowMatch ? (cachedMatch ? renderMatch(cachedMatch, job) : renderMatchSkeleton()) : renderNoProfileMatchReply(job)}
     <div class="day-divider"><span>My notes</span></div>
     ${notes.length ? notes.map((note) => `
       <article class="message">
@@ -1488,13 +1488,15 @@ function renderJobDmPrepReply(job) {
   `;
 }
 
-function renderNoProfileMatchReply() {
+function renderNoProfileMatchReply(job) {
+  const jobId = String(job?.id || "");
+  const sender = jobSender(job);
   return `
     <article class="message match-message">
-      <div class="message-avatar match-avatar">매</div>
+      ${job ? renderAvatarElement(job, `data-open-dm="${escapeHtml(jobId)}" title="DM에 추가"`) : `<div class="message-avatar match-avatar">매</div>`}
       <div class="message-content">
         <div class="message-meta">
-          <span class="message-name">매칭분석이</span>
+          ${job ? `<button class="message-name" data-open-dm="${escapeHtml(jobId)}">${escapeHtml(sender.name)}</button>` : `<span class="message-name">${escapeHtml(sender.name)}</span>`}
           <span class="message-time">프로필 대기</span>
         </div>
         <div class="message-text match-comment">Resume & Portfolio DM에 이력서나 포트폴리오 PDF를 올리면, 이 자리에서 이 공고와 내 프로필의 매칭 점수와 보완 방향을 바로 붙여둘게요.</div>
@@ -1671,7 +1673,7 @@ async function renderThread(job) {
   if (renderToken !== threadRenderToken || String(state.selectedJob?.id) !== String(job.id)) return;
   const result = threadBody.querySelector("#matchResult");
   if (result) {
-    result.innerHTML = renderMatch(match.match);
+    result.innerHTML = renderMatch(match.match, job);
     scrollToBottom(threadBody);
   }
 }
@@ -1755,8 +1757,10 @@ function extractFirstUrl(text = "") {
   return match ? match[0].replace(/[)\].,;!?]+$/, "") : "";
 }
 
-function renderMatch(match) {
+function renderMatch(match, job = null) {
   const score = Math.max(0, Math.min(100, Math.round(Number(match.score || 0))));
+  const jobId = String(job?.id || "");
+  const sender = job ? jobSender(job) : { name: "매칭분석이" };
   const fallbackComment = [
     match.summary,
     (match.strengths || []).length ? `좋아 보이는 부분: ${(match.strengths || []).join(", ")}` : "",
@@ -1766,10 +1770,10 @@ function renderMatch(match) {
   const comment = match.comment_text || fallbackComment;
   return `
     <article class="message match-message">
-      <div class="message-avatar match-avatar">매</div>
+      ${job ? renderAvatarElement(job, `data-open-dm="${escapeHtml(jobId)}" title="DM에 추가"`) : `<div class="message-avatar match-avatar">매</div>`}
       <div class="message-content">
         <div class="message-meta">
-          <span class="message-name">매칭분석이</span>
+          ${job ? `<button class="message-name" data-open-dm="${escapeHtml(jobId)}">${escapeHtml(sender.name)}</button>` : `<span class="message-name">${escapeHtml(sender.name)}</span>`}
           <span class="message-time">${score}점 · 매칭 메모</span>
         </div>
         <div class="message-text match-comment">${escapeHtml(formatSlackText(comment))}</div>
