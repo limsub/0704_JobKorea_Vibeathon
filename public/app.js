@@ -81,6 +81,7 @@ const threadChannel = document.querySelector("#threadChannel");
 const closeThread = document.querySelector("#closeThread");
 const threadReply = document.querySelector("#threadReply");
 const threadInput = document.querySelector("#threadInput");
+const laterRailButton = document.querySelector("#laterRailButton");
 const searchTrigger = document.querySelector("#searchTrigger");
 const searchOverlay = document.querySelector("#searchOverlay");
 const searchInput = document.querySelector("#searchInput");
@@ -507,13 +508,24 @@ function renderSidebar() {
 function renderRailState() {
   document.querySelectorAll("[data-rail-home]").forEach((button) => {
     button.classList.toggle("active", state.activeMode === "channel");
+    button.setAttribute("aria-pressed", String(state.activeMode === "channel"));
   });
   document.querySelectorAll("[data-rail-dms]").forEach((button) => {
     button.classList.toggle("active", state.activeMode === "dm");
+    button.setAttribute("aria-pressed", String(state.activeMode === "dm"));
   });
   document.querySelectorAll("[data-later-view]").forEach((button) => {
     button.classList.toggle("active", state.activeMode === "later");
+    button.setAttribute("aria-pressed", String(state.activeMode === "later"));
   });
+}
+
+function openLaterView(reactionKey = state.activeLaterReaction) {
+  state.activeMode = "later";
+  state.activeDm = null;
+  if (reactionKey && validReactionKeys.has(reactionKey)) state.activeLaterReaction = reactionKey;
+  closeThreadPanel();
+  render();
 }
 
 function renderChannel() {
@@ -1300,10 +1312,7 @@ document.addEventListener("click", async (event) => {
   }
 
   if (event.target.closest("[data-later-view]")) {
-    state.activeMode = "later";
-    state.activeDm = null;
-    closeThreadPanel();
-    render();
+    openLaterView();
     return;
   }
 
@@ -1365,10 +1374,7 @@ document.addEventListener("click", async (event) => {
 
   const laterReaction = event.target.closest("[data-later-reaction]");
   if (laterReaction) {
-    state.activeMode = "later";
-    state.activeLaterReaction = laterReaction.dataset.laterReaction;
-    closeThreadPanel();
-    render();
+    openLaterView(laterReaction.dataset.laterReaction);
     return;
   }
 
@@ -1523,6 +1529,11 @@ threadReply.addEventListener("submit", async (event) => {
 });
 
 closeThread.addEventListener("click", () => closeThreadPanel());
+laterRailButton?.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  openLaterView();
+});
 searchTrigger.addEventListener("click", () => {
   searchOverlay.classList.add("open");
   searchInput.focus();
