@@ -241,6 +241,65 @@ function formatSlackText(value = "") {
   return String(value ?? "").replace(/:eyes:|:memo:|:bulb:|:mag:|:sparkles:/g, (token) => emojiMap[token] || token);
 }
 
+function formatMatchCommentText(value = "") {
+  let text = formatSlackText(value)
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (!text) return "";
+
+  const starters = [
+    "다만",
+    "근데",
+    "반대로",
+    "아쉬운",
+    "걸리는",
+    "확인할",
+    "보완 포인트",
+    "보완하면",
+    "보완할",
+    "추천 방향",
+    "추천 포지셔닝",
+    "방향은",
+    "그래서",
+    "저라면",
+    "다음",
+    "우선",
+    "한 줄",
+    "면접",
+    "자소서",
+    "포트폴리오",
+    "지원 메시지",
+    "정리하면",
+  ];
+  text = text.replace(new RegExp(`\\s+(${starters.join("|")})`, "g"), "\n\n$1");
+  text = text.replace(/\s+(?=(?:\d+\.|[-•])\s)/g, "\n");
+  const hasReadableBreaks = text.includes("\n\n") || text.split("\n").filter(Boolean).length >= 4;
+  if (hasReadableBreaks) return text.replace(/\n{3,}/g, "\n\n").trim();
+  if (text.includes("\n\n")) return text.replace(/\n{3,}/g, "\n\n").trim();
+
+  const sentences = [];
+  text.replace(/[^.!?。！？]+[.!?。！？]+|[^.!?。！？]+$/g, (part) => {
+    const sentence = part.trim();
+    if (sentence) sentences.push(sentence);
+    return part;
+  });
+  if (sentences.length < 3 || text.length < 120) return text;
+
+  const paragraphs = [];
+  sentences.forEach((sentence, index) => {
+    const last = paragraphs[paragraphs.length - 1] || "";
+    if (index === 0 || last.length > 95 || paragraphs.length >= 3) {
+      paragraphs.push(sentence);
+    } else {
+      paragraphs[paragraphs.length - 1] = `${last} ${sentence}`;
+    }
+  });
+  return paragraphs.join("\n\n");
+}
+
 function decorateJobs(channelId, jobs = []) {
   const used = new Set();
   return jobs.map((job, index) => {
@@ -1759,7 +1818,7 @@ function renderMatch(match, job = null) {
     (match.risks || []).length ? `확인할 부분: ${(match.risks || []).join(", ")}` : "",
     (match.nextActions || []).length ? `다음 액션\n${(match.nextActions || []).slice(0, 3).map((item, index) => `${index + 1}. ${item}`).join("\n")}` : "",
   ].filter(Boolean).join("\n\n");
-  const comment = match.comment_text || fallbackComment;
+  const comment = formatMatchCommentText(match.comment_text || fallbackComment);
   return `
     <article class="message match-message">
       ${job ? renderAvatarElement(job, `data-open-dm="${escapeHtml(jobId)}" title="DM에 추가"`) : `<div class="message-avatar match-avatar">매</div>`}
@@ -1768,7 +1827,7 @@ function renderMatch(match, job = null) {
           ${job ? `<button class="message-name" data-open-dm="${escapeHtml(jobId)}">${escapeHtml(sender.name)}</button>` : `<span class="message-name">${escapeHtml(sender.name)}</span>`}
           <span class="message-time">${score}점 · 매칭 메모</span>
         </div>
-        <div class="message-text match-comment">${escapeHtml(formatSlackText(comment))}</div>
+        <div class="message-text match-comment">${escapeHtml(comment)}</div>
       </div>
     </article>
   `;

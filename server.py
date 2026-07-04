@@ -558,6 +558,7 @@ MATCH_ANALYSIS_PROMPT = """
 - comment_text는 "매칭분석이"가 Slack 스레드에 직접 남기는 두 번째 댓글처럼 쓴다. 발화자 이름, "포트폴리오 매칭:" 같은 제목, JSON 느낌의 라벨은 쓰지 않는다.
 - comment_text는 공고별로 말투와 길이가 달라야 한다. 어떤 것은 짧은 실무 코멘트, 어떤 것은 꼼꼼한 코칭, 어떤 것은 가벼운 팀원 피드백처럼 자연스럽게 쓴다.
 - comment_text에는 점수, 실제로 겹치는 키워드/경험, 부족한 지점, 추천 방향, 다음에 보완할 문장/프로젝트 방향을 포함한다.
+- comment_text는 Slack 댓글처럼 문단을 나눈다. 3~5개의 짧은 문단으로 쓰고, 보완 액션이 있으면 각 항목 앞에 줄바꿈을 넣는다.
 - "좋아요/아쉬워요/다음 액션" 같은 고정 표를 반복하지 말고, 실제 사람이 보고 판단한 문장처럼 이어 쓴다.
 - 포트폴리오 keyword_inventory와 evidence_phrases를 적극적으로 사용해 근거를 풍부하게 만든다.
 - 포트폴리오/이력서에 없는 경험을 만들어내지 않는다.
@@ -783,6 +784,18 @@ def clean_text(value):
     value = re.sub(r"<[^>]+>", " ", value)
     value = re.sub(r"\\u0026", "&", value)
     value = re.sub(r"\s+", " ", value)
+    return value.strip()
+
+
+def clean_multiline_text(value):
+    value = html.unescape(str(value or ""))
+    value = re.sub(r"<\s*br\s*/?\s*>", "\n", value, flags=re.I)
+    value = re.sub(r"</\s*(p|div|li|section|article|h[1-6])\s*>", "\n", value, flags=re.I)
+    value = re.sub(r"<[^>]+>", " ", value)
+    value = re.sub(r"\\u0026", "&", value)
+    value = re.sub(r"[ \t\f\v]+", " ", value)
+    value = re.sub(r" *\n *", "\n", value)
+    value = re.sub(r"\n{3,}", "\n\n", value)
     return value.strip()
 
 
@@ -2695,10 +2708,56 @@ def has_quantified_profile_signal(profile=None, profile_result=None):
     return bool(re.search(r"\d|%|배|건|명|원|억|만|증가|감소|개선|달성|런칭|출시", text))
 
 
+def shape_match_comment_paragraphs(text):
+    text = clean_multiline_text(text)
+    if not text:
+        return ""
+    starters = [
+        "다만",
+        "근데",
+        "반대로",
+        "아쉬운",
+        "걸리는",
+        "확인할",
+        "보완 포인트",
+        "보완하면",
+        "보완할",
+        "추천 방향",
+        "추천 포지셔닝",
+        "방향은",
+        "그래서",
+        "저라면",
+        "다음",
+        "우선",
+        "한 줄",
+        "면접",
+        "자소서",
+        "포트폴리오",
+        "지원 메시지",
+        "정리하면",
+    ]
+    text = re.sub(r"\s+(" + "|".join(map(re.escape, starters)) + r")", r"\n\n\1", text)
+    text = re.sub(r"\s+(?=(?:\d+\.|[-•])\s)", "\n", text)
+    if "\n\n" in text or len([line for line in text.splitlines() if line.strip()]) >= 4:
+        return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+    sentences = [item.strip() for item in re.findall(r"[^.!?。！？]+[.!?。！？]+|[^.!?。！？]+$", text) if item.strip()]
+    if len(sentences) < 3 or len(text) < 120:
+        return text.strip()
+    paragraphs = []
+    for index, sentence in enumerate(sentences):
+        last = paragraphs[-1] if paragraphs else ""
+        if index == 0 or len(last) > 95 or len(paragraphs) >= 3:
+            paragraphs.append(sentence)
+        else:
+            paragraphs[-1] = f"{last} {sentence}"
+    return "\n\n".join(paragraphs).strip()
+
+
 def normalize_match_comment_text(value):
-    text = clean_text(value)
+    text = clean_multiline_text(value)
     text = re.sub(r"^(매칭분석이|포트폴리오\s*매칭|매칭\s*분석)\s*[:：]\s*", "", text)
-    return text
+    return shape_match_comment_paragraphs(text)
 
 
 def local_match_comment(job, score, strengths, risks, next_actions, recommendation):
