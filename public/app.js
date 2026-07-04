@@ -1,5 +1,36 @@
 const API = "";
 const MAX_PROFILE_PDF_BYTES = 40 * 1024 * 1024;
+const LOCAL_STATE_KEY = "slezzuk_local_state_v1";
+
+const DEFAULT_ENABLED_CHANNEL_IDS = ["pm", "ios", "server", "frontend", "data"];
+const DEFAULT_PROFILE = {
+  resume: "",
+  portfolio: "",
+  skills: "PM, 서비스기획, 데이터분석, iOS, Swift, 서버개발, API",
+  preferences: "성장 가능성, 좋은 동료, 명확한 역할, 합리적인 연봉",
+};
+const DEFAULT_PROFILE_ANALYSIS = {
+  status: "not_started",
+  attempts: 0,
+  locked: false,
+  lastError: "",
+  sourceDocument: null,
+  extractedText: "",
+  convertedJsonText: "",
+  result: null,
+  model: "",
+  attemptedAt: "",
+  completedAt: "",
+};
+const DIRECT_CHANNEL = {
+  id: "direct",
+  name: "direct-parsing",
+  query: "",
+  subtitle: "채용공고 URL을 붙여넣으면 thread로 파싱",
+  bookmarks: ["URL parser", "Raw posting", "Thread"],
+  source: "system",
+  protected: true,
+};
 
 let channels = [];
 
@@ -17,6 +48,7 @@ const state = {
   jobs: { direct: [] },
   channelCatalog: [],
   enabledChannelIds: [],
+  customChannels: [],
   classifications: {},
   notes: {},
   profile: {},
@@ -91,13 +123,7 @@ function uploadApi(path, body) {
 }
 
 function currentChannel() {
-  return channels.find((channel) => channel.id === state.activeChannel) || channels[0] || {
-    id: "direct",
-    name: "direct-parsing",
-    query: "",
-    subtitle: "채용공고 URL을 붙여넣으면 thread로 파싱",
-    bookmarks: [],
-  };
+  return channels.find((channel) => channel.id === state.activeChannel) || channels[0] || { ...DIRECT_CHANNEL };
 }
 
 function initials(name = "?") {
@@ -111,6 +137,136 @@ function colorFor(value = "") {
 
 function escapeHtml(value = "") {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char]);
+}
+
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function defaultLocalState() {
+  return {
+    version: 1,
+    classifications: {},
+    notes: {},
+    profile: clone(DEFAULT_PROFILE),
+    profileAnalysis: clone(DEFAULT_PROFILE_ANALYSIS),
+    directParsedJobs: [],
+    enabledChannelIds: [...DEFAULT_ENABLED_CHANNEL_IDS],
+    customChannels: [],
+    tone: "business",
+  };
+}
+
+function readLocalState() {
+  try {
+    const raw = localStorage.getItem(LOCAL_STATE_KEY);
+    if (!raw) return defaultLocalState();
+    const parsed = JSON.parse(raw);
+    return { ...defaultLocalState(), ...parsed };
+  } catch (err) {
+    console.warn("Failed to read local state", err);
+    return defaultLocalState();
+  }
+}
+
+function localStateSnapshot() {
+  return {
+    version: 1,
+    classifications: state.classifications,
+    notes: state.notes,
+    profile: state.profile,
+    profileAnalysis: state.profileAnalysis,
+    directParsedJobs: compactJobsForStorage(state.jobs.direct || []),
+    enabledChannelIds: state.enabledChannelIds,
+    customChannels: state.customChannels,
+    tone: state.tone,
+  };
+}
+
+function compactAnalysisForStorage(analysis = {}) {
+  const compact = { ...analysis };
+  if (typeof compact.extractedText === "string" && compact.extractedText.length > 120000) {
+    compact.extractedText = `${compact.extractedText.slice(0, 120000)}\n\n[브라우저 저장 공간 보호를 위해 이후 텍스트는 생략됨]`;
+  }
+  if (typeof compact.convertedJsonText === "string" && compact.convertedJsonText.length > 240000) {
+    compact.convertedJsonText = `${compact.convertedJsonText.slice(0, 240000)}\n\n[브라우저 저장 공간 보호를 위해 이후 JSON 텍스트는 생략됨]`;
+  }
+  return compact;
+}
+
+function compactJobsForStorage(jobs = []) {
+  return jobs.map((job) => {
+    const compact = { ...job };
+    if (compact.raw?.raw_text && compact.raw.raw_text.length > 60000) {
+      compact.raw = {
+        ...compact.raw,
+        raw_text: `${compact.raw.raw_text.slice(0, 60000)}\n\n[브라우저 저장 공간 보호를 위해 이후 원문은 생략됨]`,
+      };
+    }
+    return compact;
+  });
+}
+
+function saveLocalState() {
+  const snapshot = localStateSnapshot();
+  try {
+    localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify(snapshot));
+  } catch (err) {
+    try {
+      localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify({
+        ...snapshot,
+        profileAnalysis: compactAnalysisForStorage(snapshot.profileAnalysis),
+      }));
+      console.warn("Local state was saved in compact form", err);
+    } catch (compactErr) {
+      console.warn("Failed to save local state", compactErr);
+    }
+  }
+}
+
+function localTimestamp() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+}
+
+function allLocalChannels() {
+  return [...state.channelCatalog, ...state.customChannels];
+}
+
+function rebuildChannels() {
+  const enabled = new Set(state.enabledChannelIds);
+  channels = allLocalChannels().filter((channel) => enabled.has(channel.id));
+  channels.push({ ...DIRECT_CHANNEL });
+  channels.forEach((channel) => {
+    if (!state.jobs[channel.id]) state.jobs[channel.id] = [];
+  });
+}
+
+function slugifyChannelId(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^0-9a-z가-힣]+/g, "-")
+    .replace(/^-+|-+$/g, "") || `channel-${Date.now()}`;
+}
+
+function normalizeLocalChannel(channel, source = "custom") {
+  const query = String(channel.query || channel.name || "개발자").trim();
+  const name = String(channel.name || query).trim();
+  const rawBookmarks = channel.bookmarks || query;
+  const bookmarks = Array.isArray(rawBookmarks)
+    ? rawBookmarks
+    : String(rawBookmarks).split(/[,/ ]+/).filter(Boolean);
+  return {
+    id: String(channel.id || `custom-${slugifyChannelId(query)}`).trim(),
+    name,
+    query,
+    subtitle: String(channel.subtitle || `JobKorea ${query} 공고 피드`).trim(),
+    bookmarks: bookmarks.slice(0, 8),
+    category: channel.category || "사용자 추가",
+    source,
+    protected: Boolean(channel.protected),
+  };
 }
 
 function jobRaw(job) {
@@ -187,26 +343,33 @@ async function boot() {
 }
 
 async function loadState() {
-  const data = await api("/api/state").catch(() => ({}));
+  const data = readLocalState();
   state.classifications = data.classifications || {};
   state.notes = data.notes || {};
-  state.profile = data.profile || {};
-  state.profileAnalysis = data.profileAnalysis || {};
+  state.profile = { ...clone(DEFAULT_PROFILE), ...(data.profile || {}) };
+  state.profileAnalysis = { ...clone(DEFAULT_PROFILE_ANALYSIS), ...(data.profileAnalysis || {}) };
   state.jobs.direct = data.directParsedJobs || [];
+  state.enabledChannelIds = data.enabledChannelIds || [...DEFAULT_ENABLED_CHANNEL_IDS];
+  state.customChannels = (data.customChannels || []).map((channel) => normalizeLocalChannel(channel, "custom"));
+  state.tone = data.tone || "business";
 }
 
 async function loadChannels() {
   const data = await api("/api/channels");
-  channels = data.channels || [];
-  state.channelCatalog = data.catalog || [];
-  state.enabledChannelIds = data.enabledChannelIds || [];
-  channels.forEach((channel) => {
-    if (!state.jobs[channel.id]) state.jobs[channel.id] = [];
-  });
+  state.channelCatalog = (data.catalog || []).filter((channel) => channel.source !== "custom");
+  const knownIds = new Set(allLocalChannels().map((channel) => channel.id));
+  state.enabledChannelIds = state.enabledChannelIds.filter((channelId) => knownIds.has(channelId));
+  if (!state.enabledChannelIds.length) state.enabledChannelIds = [...DEFAULT_ENABLED_CHANNEL_IDS].filter((channelId) => knownIds.has(channelId));
+  rebuildChannels();
+  saveLocalState();
 }
 
 async function loadJobs(channelId) {
-  const data = await api(`/api/jobs?channel=${encodeURIComponent(channelId)}`).catch(() => ({ jobs: [] }));
+  const channel = channels.find((item) => item.id === channelId);
+  const path = channel?.source === "custom"
+    ? `/api/search?q=${encodeURIComponent(channel.query || channel.name || channelId)}`
+    : `/api/jobs?channel=${encodeURIComponent(channelId)}`;
+  const data = await api(path).catch(() => ({ jobs: [] }));
   state.jobs[channelId] = data.jobs || [];
 }
 
@@ -613,7 +776,7 @@ async function renderThread(job) {
     <div id="matchResult">${emptyBlock("매칭 결과를 불러오는 중입니다.")}</div>
   `;
   scrollToBottom(threadBody);
-  const match = await api("/api/match", { method: "POST", body: JSON.stringify({ job }) }).catch((err) => ({ match: { score: 0, summary: err.message, strengths: [], risks: [], nextActions: [] } }));
+  const match = await api("/api/match", { method: "POST", body: JSON.stringify({ job, profile: state.profile }) }).catch((err) => ({ match: { score: 0, summary: err.message, strengths: [], risks: [], nextActions: [] } }));
   const result = document.querySelector("#matchResult");
   if (result) {
     result.innerHTML = renderMatch(match.match);
@@ -753,7 +916,11 @@ async function submitComposer(text) {
     const match = text.match(/https?:\/\/\S+/);
     if (!match) return alert("채용공고 URL을 붙여넣어 주세요.");
     const data = await api(`/api/parse?url=${encodeURIComponent(match[0])}`);
-    state.jobs.direct.unshift(data.job);
+    if (!state.jobs.direct.some((job) => (job.source_url || job.url) === match[0])) {
+      state.jobs.direct.unshift(data.job);
+      state.jobs.direct = state.jobs.direct.slice(0, 30);
+      saveLocalState();
+    }
     render();
     renderThread(data.job);
     return;
@@ -806,8 +973,8 @@ async function submitComposer(text) {
 
   if (state.activeMode === "dm" && state.activeDm?.startsWith("job:")) {
     const jobId = state.activeDm.replace("job:", "");
-    const data = await api("/api/note", { method: "POST", body: JSON.stringify({ jobId, text }) });
-    state.notes[jobId] = data.notes;
+    state.notes[jobId] = [...(state.notes[jobId] || []), { text, createdAt: localTimestamp() }];
+    saveLocalState();
     render();
     return;
   }
@@ -826,20 +993,50 @@ function extractSearchQuery(text) {
 }
 
 function applyChannelPayload(data) {
-  channels = data.channels || channels;
-  state.channelCatalog = data.catalog || state.channelCatalog;
-  state.enabledChannelIds = data.enabledChannelIds || state.enabledChannelIds;
-  channels.forEach((channel) => {
-    if (!state.jobs[channel.id]) state.jobs[channel.id] = [];
-  });
+  if (data.catalog) state.channelCatalog = data.catalog.filter((channel) => channel.source !== "custom");
+  if (data.customChannels) state.customChannels = data.customChannels.map((channel) => normalizeLocalChannel(channel, "custom"));
+  if (data.enabledChannelIds) state.enabledChannelIds = data.enabledChannelIds;
+  rebuildChannels();
   if (!channels.some((channel) => channel.id === state.activeChannel)) {
     state.activeChannel = channels.find((channel) => channel.id !== "direct")?.id || "direct";
   }
 }
 
 async function mutateChannels(payload) {
-  const data = await api("/api/channels", { method: "POST", body: JSON.stringify(payload) });
-  applyChannelPayload(data);
+  if (payload.action === "create") {
+    const channel = normalizeLocalChannel({
+      name: payload.name,
+      query: payload.query,
+      id: `custom-${slugifyChannelId(payload.query || payload.name)}`,
+      bookmarks: payload.bookmarks || payload.query || payload.name,
+    }, "custom");
+    const existingIds = new Set(allLocalChannels().map((item) => item.id));
+    let channelId = channel.id;
+    let suffix = 2;
+    while (existingIds.has(channelId)) {
+      channelId = `${channel.id}-${suffix}`;
+      suffix += 1;
+    }
+    channel.id = channelId;
+    state.customChannels.push(channel);
+    state.enabledChannelIds.push(channel.id);
+  } else if (payload.action === "setEnabled") {
+    const enabled = new Set(state.enabledChannelIds);
+    if (payload.enabled) enabled.add(payload.channelId);
+    else enabled.delete(payload.channelId);
+    state.enabledChannelIds = allLocalChannels().map((channel) => channel.id).filter((channelId) => enabled.has(channelId));
+  } else if (payload.action === "delete") {
+    state.customChannels = state.customChannels.filter((channel) => channel.id !== payload.channelId);
+    state.enabledChannelIds = state.enabledChannelIds.filter((channelId) => channelId !== payload.channelId);
+    delete state.jobs[payload.channelId];
+  } else {
+    throw new Error("unknown channel action");
+  }
+  applyChannelPayload({
+    customChannels: state.customChannels,
+    enabledChannelIds: state.enabledChannelIds,
+  });
+  saveLocalState();
   await Promise.all(channels.filter((channel) => channel.id !== "direct" && !state.jobs[channel.id]?.length).map((channel) => loadJobs(channel.id)));
   renderChannelManager();
   render();
@@ -856,7 +1053,7 @@ function renderChannelManager() {
   if (!channelManager) return;
   const query = (channelFilter?.value || "").trim().toLowerCase();
   const enabled = new Set(state.enabledChannelIds);
-  const visibleChannels = state.channelCatalog.filter((channel) => {
+  const visibleChannels = allLocalChannels().filter((channel) => {
     const haystack = `${channel.name} ${channel.query} ${channel.category} ${(channel.bookmarks || []).join(" ")}`.toLowerCase();
     return !query || haystack.includes(query);
   });
@@ -945,7 +1142,7 @@ document.addEventListener("click", async (event) => {
     const current = new Set(state.classifications[jobId] || []);
     current.has(reaction) ? current.delete(reaction) : current.add(reaction);
     state.classifications[jobId] = [...current];
-    await api("/api/classify", { method: "POST", body: JSON.stringify({ jobId, classification: state.classifications[jobId] }) }).catch(() => null);
+    saveLocalState();
     render();
   }
 
@@ -969,8 +1166,8 @@ document.addEventListener("click", async (event) => {
       skills: document.querySelector("#skillsInput").value,
       preferences: document.querySelector("#preferencesInput").value,
     };
-    const data = await api("/api/profile", { method: "POST", body: JSON.stringify({ profile }) });
-    state.profile = data.profile;
+    state.profile = { ...state.profile, ...profile };
+    saveLocalState();
     render();
   }
 });
@@ -978,6 +1175,7 @@ document.addEventListener("click", async (event) => {
 document.addEventListener("input", (event) => {
   if (event.target.id === "toneSlider") {
     state.tone = ["raw", "business", "friendly"][Number(event.target.value)];
+    saveLocalState();
     render();
   }
   if (event.target.id === "channelFilter") {
@@ -1019,8 +1217,11 @@ document.addEventListener("submit", async (event) => {
   try {
     const data = await uploadApi("/api/profile/analyze-pdf", form);
     state.profileAnalysis = data.analysis || {};
-    state.profile = data.profile || state.profile;
+    if (data.profile && Object.keys(data.profile).length) {
+      state.profile = { ...state.profile, ...data.profile };
+    }
     state.profileSelectedFileName = "";
+    saveLocalState();
   } catch (err) {
     state.profileUploadError = err.message;
   } finally {
@@ -1058,8 +1259,8 @@ threadReply.addEventListener("submit", async (event) => {
   const text = threadInput.value.trim();
   if (!text || !state.selectedJob) return;
   threadInput.value = "";
-  const data = await api("/api/note", { method: "POST", body: JSON.stringify({ jobId: state.selectedJob.id, text }) });
-  state.notes[state.selectedJob.id] = data.notes;
+  state.notes[state.selectedJob.id] = [...(state.notes[state.selectedJob.id] || []), { text, createdAt: localTimestamp() }];
+  saveLocalState();
   renderThread(state.selectedJob);
 });
 

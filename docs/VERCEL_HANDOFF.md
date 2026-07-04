@@ -17,7 +17,7 @@
 - Vercel Python Serverless Function 엔트리포인트 `api/index.py`를 추가했다.
 - `/api/*` 요청을 Python 함수로 보내는 `vercel.json`을 추가했다.
 - `server.py`를 로컬 HTTP 서버와 Vercel 함수에서 같이 쓸 수 있게 조정했다.
-- Vercel에서는 상태 파일을 `/tmp/jobkorea-vibe-state/state.json`에 임시 저장하도록 했다.
+- Vercel 배포 앱의 개인 상태는 서버 파일이 아니라 브라우저 `localStorage`에 저장하도록 했다.
 - Cloudflare quick tunnel 스크립트 `scripts/start_cloudflared.sh`를 삭제했다.
 - README와 개발 문서를 Vercel 기준으로 갱신했다.
 - Vercel 배포 후 루트 `/`에서 Directory Listing이 보이던 문제를 루트 `index.html` 추가로 해결했다.
@@ -43,8 +43,31 @@
 ├── requirements.txt
 └── data/
     ├── job_roles.json
-    └── state.json             # 로컬 상태 저장
+    └── state.json             # 레거시 기본 상태 파일. 배포 개인 상태는 localStorage
 ```
+
+## 개인 데이터 저장 방식
+
+Vercel 배포 환경에서는 서버리스 파일 시스템이나 `/tmp`에 개인 데이터를 저장하지 않는다.
+
+브라우저별 개인 상태는 아래 키에 저장된다.
+
+```text
+slezzuk_local_state_v1
+```
+
+저장 대상:
+
+- 이력서/프로필 입력값
+- PDF 분석 결과
+- 공고별 메모
+- 이모지 분류
+- 채널 표시/숨김
+- 사용자 추가 채널
+- 직접 URL 파싱으로 추가한 공고
+- 톤 슬라이더 설정
+
+같은 Vercel URL을 여러 사용자가 열어도 각자의 브라우저 저장소가 다르므로 서로의 개인 데이터가 보이지 않는다. 단, 브라우저 저장소를 삭제하거나 다른 PC/브라우저로 접속하면 개인 상태는 이어지지 않는다.
 
 ## 중요한 경로 규칙
 
@@ -116,12 +139,13 @@ PORT=5184 ./scripts/start_server.sh
 
 ## 현재 한계
 
-Vercel 서버리스 환경은 배포 파일 시스템을 영구 저장소처럼 쓰기 어렵다.
+브라우저 `localStorage` 기반이므로 로그인 없는 개인화는 가능하지만 기기간 동기화는 되지 않는다.
 
-- 로컬: `data/state.json`에 상태 저장
-- Vercel: `/tmp/jobkorea-vibe-state/state.json`에 임시 저장
+- 같은 브라우저에서는 새로고침/재접속 후에도 유지된다.
+- 브라우저 저장소 삭제 시 개인 상태가 삭제된다.
+- 다른 PC나 다른 브라우저에서는 이어지지 않는다.
 
-따라서 Vercel에서는 메모, 분류, 프로필, PDF 분석 결과가 콜드 스타트나 재배포 후 초기화될 수 있다. 실제 서비스처럼 영구 저장하려면 Vercel KV, Vercel Postgres, Supabase 같은 외부 DB를 붙여야 한다.
+실제 서비스처럼 계정 기반 동기화가 필요하면 Vercel KV, Vercel Postgres, Supabase 같은 외부 DB와 로그인/익명 사용자 ID 설계를 붙여야 한다.
 
 ## 다음 구현 채팅에서 지켜야 할 것
 
@@ -130,5 +154,4 @@ Vercel 서버리스 환경은 배포 파일 시스템을 영구 저장소처럼 
 - API 수정 시 `/api/*`가 `api/index.py`를 통해 `server.py` 핸들러로 들어간다는 점을 유지한다.
 - 정적 앱 파일을 수정하면 `public/` 안 파일을 먼저 고친다.
 - 루트 `index.html`, `dashboard.html`은 Vercel 루트 진입용이므로 경로만 조심해서 유지한다.
-- 영구 저장 기능을 요구받으면 먼저 DB 선택부터 정해야 한다.
-
+- 기기간 동기화나 계정 기반 영구 저장 기능을 요구받으면 먼저 DB/인증 선택부터 정해야 한다.

@@ -42,11 +42,11 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 - `public/index.html`: Slack 스타일 메인 UI
 - `public/styles.css`: Slack 스타일 레이아웃과 채널 관리 모달 스타일
 - `public/app.js`: 채널, DM, 스레드, 검색, 메모, 프로필, 로컬 매칭 렌더링
-- `server.py`: API 서버, JobKorea 크롤링, URL 파싱, 상태 저장
+- `server.py`: API 서버, JobKorea 크롤링, URL 파싱, PDF 분석, 매칭 계산
 - `api/index.py`: Vercel Serverless Function 엔트리포인트
 - `vercel.json`: `/api/*` 요청을 Python 함수로 라우팅
 - `data/job_roles.json`: 로컬 직군 채널 카탈로그
-- `data/state.json`: 채널 표시 상태, 사용자 채널, 메모, 분류, 프로필 저장
+- 브라우저 `localStorage`: 채널 표시 상태, 사용자 채널, 메모, 분류, 프로필 저장
 - `scripts/start_server.sh`: 로컬 서버 실행
 - `scripts/start_ngrok.sh`: 로컬 서버 실행 후 ngrok 터널 실행
 
@@ -68,7 +68,7 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 
 ## 4. 채널 스펙
 
-서버는 `data/job_roles.json`의 직군 카탈로그와 `data/state.json`의 `enabledChannelIds`, `customChannels`를 합쳐 활성 채널을 만든다.
+프론트는 서버에서 받은 `data/job_roles.json` 직군 카탈로그와 브라우저 `localStorage`의 `enabledChannelIds`, `customChannels`를 합쳐 활성 채널을 만든다.
 
 기본 활성 채널:
 
@@ -85,18 +85,18 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 
 | Method | Path | 설명 |
 | --- | --- | --- |
-| GET | `/api/channels` | 직군 카탈로그, 활성 채널, 사용자 채널 조회 |
-| POST | `/api/channels` | 채널 표시/숨김, 사용자 채널 추가/삭제 |
+| GET | `/api/channels` | 직군 카탈로그 조회 |
+| POST | `/api/channels` | 레거시 호환. 실제 채널 설정 저장은 브라우저 localStorage |
 | GET | `/api/jobs?channel=pm` | 채널 검색어로 JobKorea 공고 조회 |
 | GET | `/api/search?q=...` | 키워드 기반 JobKorea 검색 |
-| GET | `/api/parse?url=...` | 채용공고 URL 파싱 후 direct 채널에 저장 |
-| GET | `/api/state` | 로컬 상태 조회 |
+| GET | `/api/parse?url=...` | 채용공고 URL 파싱 결과 반환. direct 채널 저장은 브라우저 localStorage |
+| GET | `/api/state` | 레거시 호환 기본 상태 반환 |
 | GET | `/api/docs` | 대시보드 메타데이터 조회 |
-| POST | `/api/classify` | 공고 이모지 분류 저장 |
-| POST | `/api/note` | 공고별 메모 저장 |
-| POST | `/api/profile` | 프로필 텍스트 저장 |
-| POST | `/api/profile/analyze-pdf` | PDF 업로드 후 OpenAI Responses API 분석 |
-| POST | `/api/match` | 공고와 프로필의 로컬 매칭 계산 |
+| POST | `/api/classify` | 레거시 호환. 실제 이모지 저장은 브라우저 localStorage |
+| POST | `/api/note` | 레거시 호환. 실제 메모 저장은 브라우저 localStorage |
+| POST | `/api/profile` | 레거시 호환. 실제 프로필 저장은 브라우저 localStorage |
+| POST | `/api/profile/analyze-pdf` | PDF 업로드 후 OpenAI Responses API 분석 결과 반환 |
+| POST | `/api/match` | 브라우저가 보낸 프로필과 공고의 로컬 매칭 계산 |
 | POST | `/api/ai-search` | 기존 프론트 호환용 이름. 실제 동작은 로컬 검색 봇 |
 
 ## 6. 데이터 스펙
@@ -135,12 +135,13 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 
 `slack_messages`는 ChatGPT API 연동 전까지 빈 문자열로 유지한다.
 
-`data/state.json`:
+브라우저 `localStorage`:
 
-로컬 서버에서는 `data/state.json`에 상태를 저장한다. Vercel에서는 서버리스 파일 시스템 제약 때문에 `/tmp/jobkorea-vibe-state/state.json`에 임시 저장한다.
+배포 앱의 개인 상태는 서버 파일이 아니라 브라우저 `localStorage`의 `slezzuk_local_state_v1` 키에 저장한다. 서버는 JobKorea 검색, URL 파싱, PDF 분석, 매칭 계산만 수행하고 개인 상태를 영구 저장하지 않는다.
 
 ```json
 {
+  "version": 1,
   "notes": {},
   "classifications": {},
   "profile": {
@@ -151,7 +152,8 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
   },
   "directParsedJobs": [],
   "enabledChannelIds": ["pm", "ios", "server", "frontend", "data"],
-  "customChannels": []
+  "customChannels": [],
+  "tone": "business"
 }
 ```
 

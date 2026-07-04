@@ -1033,7 +1033,6 @@ def build_profile_text_from_analysis(result):
         "portfolio": ", ".join(projects),
         "skills": ", ".join((matching.get("core_keywords") or []) + technical),
         "preferences": ", ".join((matching.get("preferred_work_style") or {}).get("location") or []),
-        "aiProfileJson": result,
     }
 
 
@@ -1057,15 +1056,8 @@ def ensure_profile_analysis_payload(state):
     return analysis
 
 
-def analyze_profile_pdf_upload(headers, body, state):
-    analysis = ensure_profile_analysis_payload(state)
-    if analysis.get("locked"):
-        return {
-            "ok": True,
-            "analysis": analysis,
-            "profile": state.get("profile", {}),
-        }, 200
-
+def analyze_profile_pdf_upload(headers, body, state=None):
+    analysis = dict(DEFAULT_PROFILE_ANALYSIS)
     fields, files = read_multipart_form(headers, body)
     upload = files.get("document")
     if not upload:
@@ -1113,11 +1105,10 @@ def analyze_profile_pdf_upload(headers, body, state):
             "attemptedAt": iso_now(),
             "completedAt": iso_now(),
         })
-        write_state(state)
         return {
             "ok": True,
             "analysis": analysis,
-            "profile": state.get("profile", {}),
+            "profile": {},
         }, 200
 
     analysis.update({
@@ -1132,17 +1123,13 @@ def analyze_profile_pdf_upload(headers, body, state):
         "attemptedAt": iso_now(),
         "completedAt": "",
     })
-    write_state(state)
 
     try:
         analysis["status"] = "running"
         analysis["attempts"] = int(analysis.get("attempts") or 0) + 1
-        write_state(state)
         ai_result, model = call_openai_profile_analysis(extracted_text, document_type, source_document)
         result = wrap_profile_analysis_result(ai_result, source_document, extracted_text, model)
     except Exception as exc:
-        state = read_state()
-        analysis = ensure_profile_analysis_payload(state)
         analysis.update({
             "status": "text_extracted",
             "locked": False,
@@ -1151,16 +1138,13 @@ def analyze_profile_pdf_upload(headers, body, state):
             "result": "",
             "completedAt": iso_now(),
         })
-        write_state(state)
         return {
             "ok": True,
             "analysis": analysis,
-            "profile": state.get("profile", {}),
+            "profile": {},
         }, 200
 
-    state = read_state()
-    analysis = ensure_profile_analysis_payload(state)
-    state.setdefault("profile", {}).update(build_profile_text_from_analysis(result))
+    profile = build_profile_text_from_analysis(result)
     analysis.update({
         "status": "completed",
         "locked": True,
@@ -1172,11 +1156,10 @@ def analyze_profile_pdf_upload(headers, body, state):
         "model": model,
         "completedAt": iso_now(),
     })
-    write_state(state)
     return {
         "ok": True,
         "analysis": analysis,
-        "profile": state.get("profile", {}),
+        "profile": profile,
     }, 200
 
 
@@ -1432,9 +1415,8 @@ def infer_keywords(text):
     return [k for k in candidates if k.lower() in text.lower()][:8]
 
 
-def local_match(job):
-    state = read_state()
-    profile = state.get("profile", {})
+def local_match(job, profile=None):
+    profile = profile or {}
     profile_text = " ".join(str(v) for v in profile.values()).lower()
     raw = job.get("raw") or {}
     job_terms = [
@@ -1557,7 +1539,7 @@ def local_recruiter_search(message):
 
 
 def build_docs_payload():
-    state = read_state()
+    state = default_state()
     host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "5174"))
     return {
@@ -1571,20 +1553,20 @@ def build_docs_payload():
         "runtime": {
             "host": host,
             "port": port,
-            "dataPath": STATE_PATH,
+            "dataPath": "browser localStorage: slezzuk_local_state_v1",
             "roleCatalogPath": ROLE_CATALOG_PATH,
             "deployment": "vercel" if os.environ.get("VERCEL") else "local",
-            "externalShare": f"ngrok http {port}",
+            "externalShare": "Vercel production URL" if os.environ.get("VERCEL") else f"ngrok http {port}",
             "aiProvider": "OpenAI Responses API for one-time PDF profile analysis",
         },
         "features": [
             {"name": "JobKorea 공고 수집", "status": "implemented", "detail": "JobKorea Search HTML 내 Next.js hydration JSON에서 채용공고 content 배열 추출"},
             {"name": "공고 JSON 원문 표시", "status": "implemented", "detail": "채널 공고 셀에 JSON_1 형태를 그대로 출력하고 slack_messages는 빈 문자열로 유지"},
-            {"name": "동적 채널 관리", "status": "implemented", "detail": "로컬 직군 카탈로그 기반으로 채널 표시/숨김, 사용자 채널 추가/삭제"},
+            {"name": "동적 채널 관리", "status": "implemented", "detail": "직군 카탈로그 기반으로 채널 표시/숨김, 사용자 채널 추가/삭제를 브라우저 localStorage에 저장"},
             {"name": "이모지 공고 분류", "status": "implemented", "detail": "👀 관심 있음, ⭐ 지원 후보, ❌ 패스, 💰 연봉 좋음"},
-            {"name": "웹 공고 URL 파싱", "status": "implemented", "detail": "URL fetch 후 title, 기간, 경력, 지역, 키워드, 상세 문단 추론"},
-            {"name": "공고별 DM 노트", "status": "implemented", "detail": "공고 DM/스레드 reply로 자소서 초안 및 메모 저장"},
-            {"name": "PDF 이력서/포트폴리오 분석", "status": "implemented", "detail": "Resume & Portfolio DM에서 PDF만 업로드하고 OpenAI Responses API로 구조화 JSON 생성"},
+            {"name": "웹 공고 URL 파싱", "status": "implemented", "detail": "URL fetch 후 title, 기간, 경력, 지역, 키워드, 상세 문단 추론. 저장은 브라우저 localStorage"},
+            {"name": "공고별 DM 노트", "status": "implemented", "detail": "공고 DM/스레드 reply로 자소서 초안 및 메모를 브라우저 localStorage에 저장"},
+            {"name": "PDF 이력서/포트폴리오 분석", "status": "implemented", "detail": "Resume & Portfolio DM에서 PDF만 업로드하고 OpenAI Responses API로 구조화 JSON을 생성한 뒤 브라우저 localStorage에 저장"},
             {"name": "로컬 매칭 패널", "status": "implemented", "detail": "PDF 분석 JSON의 키워드와 공고 정보를 기반으로 로컬 매칭"},
             {"name": "톤 조절", "status": "implemented", "detail": "raw, business, friendly 3단계 슬라이더"},
             {"name": "자연어 검색 DM", "status": "implemented", "detail": "문장에서 핵심 키워드 추출 후 JobKorea 검색"},
@@ -1594,18 +1576,18 @@ def build_docs_payload():
             {"name": "ChatGPT API 슬랙 메시지 변환", "status": "planned", "detail": "PROMPT_1로 공고 정보를 slack_messages.message_title/message_body로 변환 예정"},
         ],
         "apis": [
-            {"method": "GET", "path": "/api/channels", "description": "직군 카탈로그, 활성 채널, 사용자 채널 조회"},
+            {"method": "GET", "path": "/api/channels", "description": "직군 카탈로그 조회"},
             {"method": "GET", "path": "/api/jobs?channel=pm", "description": "채널별 JobKorea 공고 검색"},
             {"method": "GET", "path": "/api/search?q=NC", "description": "자연어/키워드 기반 JobKorea 검색"},
-            {"method": "GET", "path": "/api/parse?url=...", "description": "채용공고 URL 직접 파싱 후 directParsedJobs에 저장"},
-            {"method": "GET", "path": "/api/state", "description": "로컬 저장 상태 조회"},
+            {"method": "GET", "path": "/api/parse?url=...", "description": "채용공고 URL 직접 파싱 결과 반환"},
+            {"method": "GET", "path": "/api/state", "description": "레거시 호환 기본 상태 반환"},
             {"method": "GET", "path": "/api/docs", "description": "문서 대시보드용 메타데이터"},
-            {"method": "POST", "path": "/api/classify", "description": "공고 이모지 분류 저장"},
-            {"method": "POST", "path": "/api/note", "description": "공고별 개인 노트 저장"},
-            {"method": "POST", "path": "/api/profile", "description": "이력서/포트폴리오/스킬/선호 저장"},
-            {"method": "POST", "path": "/api/profile/analyze-pdf", "description": "PDF 업로드 후 1회 한정 ChatGPT API 분석 JSON 저장"},
-            {"method": "POST", "path": "/api/match", "description": "공고와 프로필 매칭 결과 생성"},
-            {"method": "POST", "path": "/api/channels", "description": "채널 활성화/비활성화, 사용자 채널 추가/삭제"},
+            {"method": "POST", "path": "/api/classify", "description": "레거시 호환. 실제 저장은 브라우저 localStorage"},
+            {"method": "POST", "path": "/api/note", "description": "레거시 호환. 실제 저장은 브라우저 localStorage"},
+            {"method": "POST", "path": "/api/profile", "description": "레거시 호환. 실제 저장은 브라우저 localStorage"},
+            {"method": "POST", "path": "/api/profile/analyze-pdf", "description": "PDF 업로드 후 ChatGPT API 분석 JSON 반환"},
+            {"method": "POST", "path": "/api/match", "description": "브라우저가 보낸 프로필과 공고의 매칭 결과 생성"},
+            {"method": "POST", "path": "/api/channels", "description": "레거시 호환. 실제 저장은 브라우저 localStorage"},
             {"method": "POST", "path": "/api/ai-search", "description": "자연어 입력을 로컬 검색 의도로 해석하고 JobKorea 크롤링"},
         ],
         "state": {
@@ -1644,10 +1626,10 @@ class Handler(SimpleHTTPRequestHandler):
         params = urllib.parse.parse_qs(parsed.query)
         try:
             if parsed.path == "/api/channels":
-                return self.json(channel_payload())
+                return self.json(channel_payload(default_state()))
             if parsed.path == "/api/jobs":
                 channel = params.get("channel", ["pm"])[0]
-                channel_info = find_channel(channel) or normalize_channel({"id": channel, "name": channel, "query": channel})
+                channel_info = find_channel(channel, default_state()) or normalize_channel({"id": channel, "name": channel, "query": channel})
                 query = channel_info.get("query") or channel
                 try:
                     jobs = search_jobkorea(query)
@@ -1663,14 +1645,9 @@ class Handler(SimpleHTTPRequestHandler):
                 if not url:
                     return self.json({"error": "url is required"}, 400)
                 job = parse_posting_url(url)
-                state = read_state()
-                if not any((item.get("source_url") or item.get("url")) == url for item in state["directParsedJobs"]):
-                    state["directParsedJobs"].insert(0, job)
-                    state["directParsedJobs"] = state["directParsedJobs"][:30]
-                    write_state(state)
                 return self.json({"job": job})
             if parsed.path == "/api/state":
-                return self.json(read_state())
+                return self.json(default_state())
             if parsed.path == "/api/docs":
                 return self.json(build_docs_payload())
             return self.json({"error": "not found"}, 404)
@@ -1689,44 +1666,26 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json({"error": "request body is too large"}, 413)
             raw_body = self.rfile.read(length)
             if parsed.path == "/api/profile/analyze-pdf":
-                state = read_state()
-                payload, status = analyze_profile_pdf_upload(self.headers, raw_body, state)
+                payload, status = analyze_profile_pdf_upload(self.headers, raw_body)
                 return self.json(payload, status)
             body = raw_body.decode("utf-8")
             payload = json.loads(body or "{}")
-            state = read_state()
             if parsed.path == "/api/classify":
-                state["classifications"][payload["jobId"]] = payload.get("classification", [])
-                write_state(state)
-                return self.json({"ok": True})
+                return self.json({"ok": True, "localOnly": True})
             if parsed.path == "/api/note":
-                job_id = payload["jobId"]
-                state["notes"].setdefault(job_id, []).append({
+                note = {
                     "text": payload.get("text", ""),
                     "createdAt": time.strftime("%Y-%m-%d %H:%M:%S"),
-                })
-                write_state(state)
-                return self.json({"ok": True, "notes": state["notes"][job_id]})
+                }
+                return self.json({"ok": True, "localOnly": True, "notes": [note]})
             if parsed.path == "/api/profile":
-                state["profile"].update(payload.get("profile", {}))
-                write_state(state)
-                return self.json({"ok": True, "profile": state["profile"]})
+                return self.json({"ok": True, "localOnly": True, "profile": payload.get("profile", {})})
             if parsed.path == "/api/match":
                 job = payload.get("job", {})
-                result = local_match(job)
+                result = local_match(job, payload.get("profile") or {})
                 return self.json({"match": result})
             if parsed.path == "/api/channels":
-                action = payload.get("action")
-                if action == "create":
-                    create_custom_channel(payload, state)
-                elif action == "setEnabled":
-                    set_channel_enabled(payload, state)
-                elif action == "delete":
-                    delete_custom_channel(payload, state)
-                else:
-                    return self.json({"error": "unknown channel action"}, 400)
-                write_state(state)
-                return self.json({"ok": True, **channel_payload(state)})
+                return self.json({"ok": True, "localOnly": True, **channel_payload(default_state())})
             if parsed.path == "/api/ai-search":
                 message = payload.get("message", "").strip()
                 if not message:
