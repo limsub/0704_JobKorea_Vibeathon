@@ -694,6 +694,8 @@ button {
   margin: 0;
   max-width: 860px;
   line-height: 1.42;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .message-text ul {
@@ -1564,6 +1566,17 @@ button {
   margin: 0 0 10px;
   color: var(--muted);
   line-height: 1.42;
+}
+
+.match-comment {
+  margin: 10px 0 12px;
+  padding: 12px;
+  border: 1px solid #d6e4f2;
+  border-radius: 8px;
+  color: var(--text);
+  background: #f7fbff;
+  line-height: 1.48;
+  white-space: pre-wrap;
 }
 
 .ai-match ul {

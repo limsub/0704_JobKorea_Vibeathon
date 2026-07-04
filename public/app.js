@@ -339,7 +339,18 @@ function jobProfile(job) {
 }
 
 function jobSlackMessages(job) {
-  return job.slack_messages || { message_title: "", message_body: "" };
+  return {
+    message_title: "",
+    message_body: "",
+    thread_comment: "",
+    thread_summary: "",
+    key_points: [],
+    ai_mode: "",
+    model: "",
+    generated_at: "",
+    error: "",
+    ...(job.slack_messages || {}),
+  };
 }
 
 function jobCompany(job) {
@@ -387,7 +398,7 @@ function jobSearchText(job) {
 function jobMessageText(job) {
   const slack = jobSlackMessages(job);
   if (slack.message_title || slack.message_body) return [slack.message_title, slack.message_body].filter(Boolean).join(" ");
-  return `${jobCompany(job)} 채용공고 원문 JSON입니다. slack_messages는 ChatGPT API 연동 전까지 빈 값으로 유지됩니다.`;
+  return `${jobCompany(job)} 채용공고를 불러왔습니다. Slack 메시지 변환 결과가 없으면 원문 JSON을 확인해 주세요.`;
 }
 
 async function boot() {
@@ -577,7 +588,7 @@ function renderChannel(options = {}) {
   }
 
   messageList.innerHTML = `
-    ${channelIntro(channel, "개발 단계에서는 JobKorea 크롤링 결과를 JSON_1 형태 그대로 보여줍니다. slack_messages는 ChatGPT API 연동 전까지 빈 값입니다.")}
+    ${channelIntro(channel, "JobKorea 크롤링 결과를 Slack 공유 메시지로 변환하고, 원문 JSON과 스레드 코멘트를 함께 보관합니다.")}
     <div class="job-toolbar">
       <button data-refresh="${channel.id}">JobKorea 새로고침</button>
     </div>
@@ -771,7 +782,7 @@ function renderJobMessage(job) {
         </div>
         <button class="reply-summary" data-thread-job="${escapeHtml(jobId)}">
           <span>${(state.notes[job.id] || []).length} notes</span>
-          <strong>View thread + local match</strong>
+          <strong>View thread + AI match</strong>
         </button>
       </div>
       <div class="message-actions">
@@ -803,6 +814,24 @@ function renderJobCard(job) {
   `;
 }
 
+function renderSlackThreadComment(job) {
+  const slack = jobSlackMessages(job);
+  if (!slack.thread_comment) return "";
+  const source = slack.ai_mode === "openai" ? (slack.model || "OpenAI") : "fallback";
+  return `
+    <article class="message slack-thread-comment">
+      <div class="message-avatar" style="background:#1264a3">JK</div>
+      <div class="message-content">
+        <div class="message-meta">
+          <span class="message-name">공고 큐레이터</span>
+          <span class="message-time">${escapeHtml(source)}</span>
+        </div>
+        <div class="message-text">${escapeHtml(slack.thread_comment)}</div>
+      </div>
+    </article>
+  `;
+}
+
 function renderDm(options = {}) {
   if (state.activeDm === "ai-search") renderAiSearchDm();
   else if (state.activeDm === "profile") renderProfileDm();
@@ -823,8 +852,8 @@ function renderAiSearchDm() {
       <h2>검색 봇</h2>
       <p>입력 문장을 로컬에서 어떻게 해석했는지, 어떤 URL을 크롤링했는지, 어떤 공고를 가져왔는지 답장에 표시합니다.</p>
       <div class="intro-meta">
-        <span>No GPT API key</span>
-        <span>No local Codex</span>
+        <span>OpenAI message transform</span>
+        <span>local intent</span>
         <span>JobKorea crawl</span>
       </div>
     </section>
@@ -1019,7 +1048,7 @@ function openThreadPanel() {
 
 function resetThreadPanel() {
   threadChannel.textContent = "# thread";
-  threadBody.innerHTML = emptyBlock("공고를 선택하면 로컬 매칭 결과가 표시됩니다.");
+  threadBody.innerHTML = emptyBlock("공고를 선택하면 Slack 코멘트와 매칭 결과가 표시됩니다.");
 }
 
 function closeThreadPanel({ clearSelection = true } = {}) {
@@ -1053,8 +1082,9 @@ async function renderThread(job) {
       : "DM";
   threadChannel.textContent = `# ${threadScope}`;
   threadBody.innerHTML = `
-    <div class="thread-context"><span>local matching</span><strong>계산 중</strong></div>
+    <div class="thread-context"><span>AI matching</span><strong>계산 중</strong></div>
     ${renderJobMessage(job)}
+    ${renderSlackThreadComment(job)}
     <div class="day-divider"><span>Parsed details</span></div>
     ${(job.details || defaultDetails(job)).map((detail) => `
       <article class="message compact-message">
@@ -1066,7 +1096,10 @@ async function renderThread(job) {
     <div id="matchResult">${emptyBlock("매칭 결과를 불러오는 중입니다.")}</div>
   `;
   scrollToBottom(threadBody);
-  const match = await api("/api/match", { method: "POST", body: JSON.stringify({ job, profile: state.profile }) }).catch((err) => ({ match: { score: 0, summary: err.message, strengths: [], risks: [], nextActions: [] } }));
+  const match = await api("/api/match", {
+    method: "POST",
+    body: JSON.stringify({ job, profile: state.profile, profileAnalysis: state.profileAnalysis }),
+  }).catch((err) => ({ match: { score: 0, summary: err.message, strengths: [], risks: [], nextActions: [] } }));
   if (renderToken !== threadRenderToken || String(state.selectedJob?.id) !== String(job.id)) return;
   const result = threadBody.querySelector("#matchResult");
   if (result) {
@@ -1090,7 +1123,7 @@ function renderProfileThread() {
         <p>${escapeHtml(message.summary || result.ai_analysis_result?.overall_summary || "")}</p>
         <div class="thread-keywords">${keywords.slice(0, 8).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>
       </section>
-      <div class="empty-thread">이 JSON은 공고 스레드의 로컬 매칭 키워드에도 반영됩니다.</div>
+      <div class="empty-thread">이 JSON은 공고 스레드의 AI/fallback 매칭에도 반영됩니다.</div>
     ` : extractedText ? `
       <section class="profile-thread-summary">
         <strong>텍스트 추출 완료</strong>
@@ -1172,6 +1205,7 @@ function defaultDetails(job) {
     `키워드: ${jobKeywords(job).join(", ") || "상세 공고 참고"}`,
     `slack_messages.message_title: ${jobSlackMessages(job).message_title || "(empty)"}`,
     `slack_messages.message_body: ${jobSlackMessages(job).message_body || "(empty)"}`,
+    `slack_messages.thread_comment: ${jobSlackMessages(job).thread_comment || "(empty)"}`,
   ];
 }
 
@@ -1180,8 +1214,9 @@ function renderMatch(match) {
     <section class="ai-match">
       <div class="match-score">${match.score}<span>%</span></div>
       <div>
-        <h3>나와의 로컬 매칭</h3>
+        <h3>나와의 매칭</h3>
         <p>${escapeHtml(match.summary || "")}</p>
+        ${match.comment_text ? `<div class="match-comment">${escapeHtml(match.comment_text)}</div>` : ""}
         <strong>강점</strong>
         <ul>${(match.strengths || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
         <strong>주의</strong>

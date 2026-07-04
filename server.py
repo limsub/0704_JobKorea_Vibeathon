@@ -31,6 +31,7 @@ OCR_MAX_PAGES = 20
 OCR_DPI = 160
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+DEFAULT_OPENAI_TIMEOUT = 60
 
 DEFAULT_ENABLED_CHANNEL_IDS = ["pm", "ios", "server", "frontend", "data"]
 
@@ -433,6 +434,91 @@ PROFILE_ANALYSIS_PROMPT = """
 - 개인정보는 원문에 있는 경우에만 추출한다.
 """.strip()
 
+SLACK_JOB_MESSAGE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["jobs"],
+    "properties": {
+        "jobs": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "id",
+                    "message_title",
+                    "message_body",
+                    "thread_comment",
+                    "thread_summary",
+                    "key_points",
+                ],
+                "properties": {
+                    "id": {"type": "string"},
+                    "message_title": {"type": "string"},
+                    "message_body": {"type": "string"},
+                    "thread_comment": {"type": "string"},
+                    "thread_summary": {"type": "string"},
+                    "key_points": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+        },
+    },
+}
+
+SLACK_JOB_MESSAGE_PROMPT = """
+너는 채용공고를 Slack 채널에 공유하는 한국어 커리어 큐레이터다.
+입력은 JobKorea에서 크롤링/파싱한 공고 JSON 배열이며, 출력은 반드시 지정된 JSON schema와 일치해야 한다.
+
+작성 원칙:
+- 사실을 바꾸거나 추측으로 단정하지 않는다. 모르는 정보는 "확인 필요"라고 쓴다.
+- message_body는 Slack 본문에 바로 붙일 수 있게 3~5문단의 자연스러운 한국어로 쓴다.
+- thread_comment는 스레드 첫 코멘트로, 짧은 해석 문단 + 핵심 항목 bullet + 확인 필요 사항 + 한 줄 결론 순서로 쓴다.
+- 사용자가 준 예시처럼 너무 딱딱한 공고 요약이 아니라 동료에게 레퍼런스를 공유하는 톤으로 쓴다.
+- 이모지는 필요할 때 텍스트 이모지(:eyes:) 정도만 적게 사용한다.
+- key_points는 역할 성격, 주요 키워드, 산업군, 경험 기준, 확인 기한, 급여/위치 중 중요한 것만 4~7개로 쓴다.
+- 각 결과의 id는 입력 job id와 정확히 같아야 한다.
+""".strip()
+
+MATCH_ANALYSIS_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "score",
+        "summary",
+        "strengths",
+        "risks",
+        "nextActions",
+        "comment_text",
+        "recommendation_direction",
+    ],
+    "properties": {
+        "score": {"type": "number"},
+        "summary": {"type": "string"},
+        "strengths": {"type": "array", "items": {"type": "string"}},
+        "risks": {"type": "array", "items": {"type": "string"}},
+        "nextActions": {"type": "array", "items": {"type": "string"}},
+        "comment_text": {"type": "string"},
+        "recommendation_direction": {"type": "string"},
+    },
+}
+
+MATCH_ANALYSIS_PROMPT = """
+너는 이력서/포트폴리오 분석 결과와 채용공고를 비교하는 한국어 커리어 매칭 코치다.
+입력은 사용자 프로필 JSON, PDF 분석 JSON, 공고 JSON, 로컬 키워드 매칭 초안이다.
+출력은 반드시 지정된 JSON schema와 일치해야 한다.
+
+작성 원칙:
+- score는 0~100 사이 숫자다. 근거가 약하면 과감히 낮춘다.
+- comment_text는 Slack 스레드의 두 번째 코멘트처럼 쓴다.
+- comment_text 첫 줄은 가능하면 "@이름 님, 이 건은 76점 정도예요." 형식으로 쓴다.
+- 장점 1~2개, 부족한 점 1~2개, 추천 방향 1개, "보완하면 좋은 것" 번호 목록을 포함한다.
+- 포트폴리오/이력서에 없는 경험을 만들어내지 않는다.
+- 공고 정보가 애매하면 "원문 확인 필요"라고 쓴다.
+- 말투는 사용자가 준 예시처럼 부드럽고 실무적인 한국어로 쓴다.
+""".strip()
+
+JOB_MESSAGE_CACHE = {}
+
 
 def default_state():
     return {
@@ -559,7 +645,7 @@ def channel_payload(state=None):
 def fallback_jobs_for(channel):
     query = channel.get("query") or channel.get("name") or "개발자"
     source_url = f"https://www.jobkorea.co.kr/Search/?stext={urllib.parse.quote(query)}"
-    return [build_job_payload(
+    jobs = [build_job_payload(
         source="fallback",
         source_url=source_url,
         raw={
@@ -578,6 +664,7 @@ def fallback_jobs_for(channel):
         },
         job_id=f"fallback-{channel.get('id', slugify_channel_id(query))}",
     )]
+    return hydrate_slack_messages(jobs)
 
 
 def create_custom_channel(payload, state):
@@ -954,43 +1041,44 @@ def openai_error_message(error):
         return clean_text(body)
 
 
-def call_openai_profile_analysis(extracted_text, document_type, source_document):
-    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("CHATGPT_API_KEY")
+def openai_api_key():
+    return os.environ.get("OPENAI_API_KEY") or os.environ.get("CHATGPT_API_KEY")
+
+
+def openai_model():
+    return os.environ.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL)
+
+
+def call_openai_structured(instructions, user_payload, schema_name, schema, max_output_tokens=4000, timeout=DEFAULT_OPENAI_TIMEOUT):
+    api_key = openai_api_key()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not configured on the server")
 
-    model = os.environ.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL)
-    text_for_ai = extracted_text[:MAX_OPENAI_TEXT_CHARS]
-    prompt = {
-        "document_type": document_type,
-        "source_document": source_document,
-        "extracted_text": text_for_ai,
-    }
+    model = openai_model()
+    if isinstance(user_payload, str):
+        input_text = user_payload
+    else:
+        input_text = json.dumps(user_payload, ensure_ascii=False)
     payload = {
         "model": model,
-        "instructions": PROFILE_ANALYSIS_PROMPT,
+        "instructions": instructions,
         "input": [
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": "다음 PDF 추출 텍스트를 분석해 JSON으로 변환하세요.\n\n" + json.dumps(prompt, ensure_ascii=False),
-                    }
-                ],
+                "content": [{"type": "input_text", "text": input_text}],
             }
         ],
         "text": {
             "format": {
                 "type": "json_schema",
-                "name": "resume_portfolio_profile",
-                "schema": PROFILE_ANALYSIS_SCHEMA,
+                "name": schema_name,
+                "schema": schema,
                 "strict": True,
             }
         },
         "store": False,
         "temperature": 0.2,
-        "max_output_tokens": 7000,
+        "max_output_tokens": max_output_tokens,
     }
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
@@ -1003,14 +1091,33 @@ def call_openai_profile_analysis(extracted_text, document_type, source_document)
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=90) as res:
+        with urllib.request.urlopen(req, timeout=timeout) as res:
             response = json.loads(res.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"OpenAI API error {exc.code}: {openai_error_message(exc)}")
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"OpenAI API request failed: {exc.reason}")
     output_text = extract_response_output_text(response)
     if not output_text:
-        raise RuntimeError("OpenAI API returned an empty analysis")
-    parsed = parse_json_object(output_text)
+        raise RuntimeError("OpenAI API returned an empty response")
+    return parse_json_object(output_text), model
+
+
+def call_openai_profile_analysis(extracted_text, document_type, source_document):
+    text_for_ai = extracted_text[:MAX_OPENAI_TEXT_CHARS]
+    prompt = {
+        "document_type": document_type,
+        "source_document": source_document,
+        "extracted_text": text_for_ai,
+    }
+    parsed, model = call_openai_structured(
+        PROFILE_ANALYSIS_PROMPT,
+        "다음 PDF 추출 텍스트를 분석해 JSON으로 변환하세요.\n\n" + json.dumps(prompt, ensure_ascii=False),
+        "resume_portfolio_profile",
+        PROFILE_ANALYSIS_SCHEMA,
+        max_output_tokens=7000,
+        timeout=90,
+    )
     return parsed, model
 
 
@@ -1219,6 +1326,13 @@ def empty_slack_messages():
     return {
         "message_title": "",
         "message_body": "",
+        "thread_comment": "",
+        "thread_summary": "",
+        "key_points": [],
+        "ai_mode": "",
+        "model": "",
+        "generated_at": "",
+        "error": "",
     }
 
 
@@ -1281,6 +1395,190 @@ def job_keywords(job):
     return [clean_text(value) for value in values if clean_text(value)]
 
 
+def env_int(name, default):
+    try:
+        return int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def compact_job_for_ai(job):
+    raw = job.get("raw") or {}
+    profile = job.get("job_profile") or {}
+    return {
+        "id": str(job.get("id", "")),
+        "source": clean_text(job.get("source")),
+        "source_url": clean_text(job.get("source_url")),
+        "raw": {
+            "title": clean_text(raw.get("title")),
+            "company_name": clean_text(raw.get("company_name")),
+            "career": clean_text(raw.get("career")),
+            "location": clean_text(raw.get("location")),
+            "salary": clean_text(raw.get("salary")),
+            "period": clean_text(raw.get("period")),
+            "raw_text_excerpt": clean_text(raw.get("raw_text"))[:1800],
+        },
+        "job_profile": {
+            "company_name": clean_text(profile.get("company_name")),
+            "job_title": clean_text(profile.get("job_title")),
+            "responsibilities": [clean_text(item) for item in (profile.get("responsibilities") or [])[:8]],
+            "required_skills": [clean_text(item) for item in (profile.get("required_skills") or [])[:12]],
+            "preferred_skills": [clean_text(item) for item in (profile.get("preferred_skills") or [])[:8]],
+            "cover_letter_questions": [clean_text(item) for item in (profile.get("cover_letter_questions") or [])[:5]],
+            "deadline": clean_text(profile.get("deadline")),
+        },
+    }
+
+
+def job_message_cache_key(job):
+    return "|".join([
+        clean_text(job.get("source_url")),
+        job_title(job),
+        job_company(job),
+        clean_text((job.get("raw") or {}).get("period")),
+    ])
+
+
+def normalize_slack_message(job, message=None, ai_mode="openai", model="", error=""):
+    message = message or {}
+    fallback = local_slack_message(job, error=error)
+    merged = {
+        "message_title": clean_text(message.get("message_title")) or fallback["message_title"],
+        "message_body": clean_text(message.get("message_body")) or fallback["message_body"],
+        "thread_comment": clean_text(message.get("thread_comment")) or fallback["thread_comment"],
+        "thread_summary": clean_text(message.get("thread_summary")) or fallback["thread_summary"],
+        "key_points": message.get("key_points") if isinstance(message.get("key_points"), list) else fallback["key_points"],
+        "ai_mode": ai_mode,
+        "model": model,
+        "generated_at": iso_now(),
+        "error": clean_text(error),
+    }
+    merged["key_points"] = [clean_text(item) for item in merged["key_points"][:8] if clean_text(item)]
+    return merged
+
+
+def local_slack_message(job, error=""):
+    company = job_company(job) or "채용공고"
+    title = job_title(job) or "공고"
+    raw = job.get("raw") or {}
+    profile = job.get("job_profile") or {}
+    keywords = job_keywords(job)
+    keyword_text = ", ".join(keywords[:5]) or "상세 직무 키워드 확인 필요"
+    career = clean_text(raw.get("career")) or "경력 기준 확인 필요"
+    location = clean_text(raw.get("location")) or "위치 확인 필요"
+    salary = clean_text(raw.get("salary")) or "급여 확인 필요"
+    period = clean_text(raw.get("period")) or clean_text(profile.get("deadline")) or "마감일 확인 필요"
+    message_body = "\n\n".join([
+        f"{company} 관련 채용공고 하나 공유해요.",
+        f"{keyword_text} 키워드가 같이 보이는 건이라,\n관련 직무 보시는 분들은 참고할 만해 보여요.",
+        f"경력 기준은 {career}이고, 확인 기한은 {period}로 잡혀 있습니다.",
+        "세부 내용은 스레드에 정리해둘게요 :eyes:",
+    ])
+    thread_comment = "\n\n".join([
+        f"{company}의 {title} 공고로 보여요.",
+        "세부 내용 가볍게 정리해봤어요.",
+        "\n".join([
+            f"- 관련 조직/회사: {company}",
+            f"- 역할 성격: {title}",
+            f"- 주요 키워드: {keyword_text}",
+            f"- 경험 기준: {career}",
+            f"- 위치: {location}",
+            f"- 확인 기한: {period}",
+            f"- 급여: {salary}",
+        ]),
+        "원문에서 일부 조건이 축약되어 보일 수 있으니 상세 페이지 확인이 필요해요.",
+    ])
+    key_points = [
+        f"회사: {company}",
+        f"역할: {title}",
+        f"키워드: {keyword_text}",
+        f"경력: {career}",
+        f"위치: {location}",
+        f"기한: {period}",
+    ]
+    return {
+        "message_title": f"{company} {title} 공유해요",
+        "message_body": message_body,
+        "thread_comment": thread_comment,
+        "thread_summary": f"{company} / {title} / {career}",
+        "key_points": key_points,
+        "ai_mode": "local_fallback",
+        "model": "",
+        "generated_at": iso_now(),
+        "error": clean_text(error),
+    }
+
+
+def apply_slack_message(job, message):
+    existing = job.get("slack_messages") or {}
+    merged = empty_slack_messages()
+    merged.update(existing)
+    merged.update(message)
+    job["slack_messages"] = merged
+    return job
+
+
+def hydrate_slack_messages(jobs):
+    if not jobs:
+        return jobs
+
+    limit = env_int("OPENAI_JOB_MESSAGE_LIMIT", 10)
+    pending = []
+    for job in jobs:
+        key = job_message_cache_key(job)
+        cached = JOB_MESSAGE_CACHE.get(key)
+        if cached:
+            apply_slack_message(job, cached)
+            continue
+        pending.append((key, job))
+
+    if not pending:
+        return jobs
+
+    if not openai_api_key() or limit <= 0:
+        reason = "OPENAI_API_KEY is not configured on the server" if not openai_api_key() else "OPENAI_JOB_MESSAGE_LIMIT disabled"
+        for key, job in pending:
+            message = normalize_slack_message(job, {}, ai_mode="local_fallback", error=reason)
+            JOB_MESSAGE_CACHE[key] = message
+            apply_slack_message(job, message)
+        return jobs
+
+    selected = pending[:limit]
+    overflow = pending[limit:]
+    try:
+        result, model = call_openai_structured(
+            SLACK_JOB_MESSAGE_PROMPT,
+            {
+                "jobs": [compact_job_for_ai(job) for _, job in selected],
+                "output_use": "Slack channel message and first thread comment for each job",
+            },
+            "job_slack_messages",
+            SLACK_JOB_MESSAGE_SCHEMA,
+            max_output_tokens=6000,
+            timeout=45,
+        )
+        by_id = {
+            str(item.get("id", "")): item
+            for item in result.get("jobs", [])
+            if isinstance(item, dict)
+        }
+        for key, job in selected:
+            message = normalize_slack_message(job, by_id.get(str(job.get("id"))), ai_mode="openai", model=model)
+            JOB_MESSAGE_CACHE[key] = message
+            apply_slack_message(job, message)
+    except Exception as exc:
+        for key, job in selected:
+            message = normalize_slack_message(job, {}, ai_mode="local_fallback", error=str(exc))
+            JOB_MESSAGE_CACHE[key] = message
+            apply_slack_message(job, message)
+
+    for key, job in overflow:
+        message = normalize_slack_message(job, {}, ai_mode="local_fallback", error="OPENAI_JOB_MESSAGE_LIMIT overflow")
+        JOB_MESSAGE_CACHE[key] = message
+        apply_slack_message(job, message)
+    return jobs
+
+
 def normalize_job(item, query):
     legacy_job_no = str(item.get("id") or item.get("legacyJobNo") or f"{query}-{time.time()}")
     url = f"https://www.jobkorea.co.kr/Recruit/GI_Read/{legacy_job_no}" if legacy_job_no else f"https://www.jobkorea.co.kr/Search/?stext={urllib.parse.quote(query)}"
@@ -1340,7 +1638,7 @@ def search_jobkorea(query, limit=10):
     text = fetch_text(url)
     content = extract_job_content(text)
     jobs = [normalize_job(item, query) for item in content if isinstance(item, dict) and item.get("title")]
-    return jobs[:limit]
+    return hydrate_slack_messages(jobs[:limit])
 
 
 def parse_posting_url(url):
@@ -1358,7 +1656,7 @@ def parse_posting_url(url):
     company = "JobKorea" if "jobkorea.co.kr" in url else urllib.parse.urlparse(url).netloc
     bullets = split_summary(visible)
     keywords = infer_keywords(visible)
-    return build_job_payload(
+    job = build_job_payload(
         source="parsed_url",
         source_url=url,
         raw={
@@ -1378,6 +1676,7 @@ def parse_posting_url(url):
         },
         job_id=f"parsed_{abs(hash(url))}",
     )
+    return hydrate_slack_messages([job])[0]
 
 
 def split_summary(text):
@@ -1415,9 +1714,93 @@ def infer_keywords(text):
     return [k for k in candidates if k.lower() in text.lower()][:8]
 
 
-def local_match(job, profile=None):
+def collect_text_values(value):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (int, float, bool)):
+        return [str(value)]
+    if isinstance(value, list):
+        values = []
+        for item in value:
+            values.extend(collect_text_values(item))
+        return values
+    if isinstance(value, dict):
+        values = []
+        for item in value.values():
+            values.extend(collect_text_values(item))
+        return values
+    return [str(value)]
+
+
+def profile_analysis_result(profile_analysis=None):
+    if not isinstance(profile_analysis, dict):
+        return {}
+    result = profile_analysis.get("result")
+    if isinstance(result, dict):
+        return result
+    if isinstance(result, str) and result.strip().startswith("{"):
+        try:
+            return json.loads(result)
+        except json.JSONDecodeError:
+            return {}
+    converted = profile_analysis.get("convertedJsonText")
+    if isinstance(converted, str) and converted.strip().startswith("{"):
+        try:
+            return json.loads(converted)
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def candidate_display_name(profile=None, profile_result=None):
+    profile_result = profile_result or {}
+    personal = (profile_result.get("candidate_profile") or {}).get("personal_info") or {}
+    name = clean_text(personal.get("name"))
+    if name:
+        return name
+    for field in ["name", "userName", "displayName"]:
+        name = clean_text((profile or {}).get(field))
+        if name:
+            return name
+    return "사용자"
+
+
+def profile_has_analysis(profile_analysis=None):
+    result = profile_analysis_result(profile_analysis)
+    return bool(result.get("schema_version") or result.get("candidate_profile") or result.get("matching_profile"))
+
+
+def compact_profile_for_ai(profile=None, profile_analysis=None):
+    result = profile_analysis_result(profile_analysis)
+    return {
+        "profile": profile or {},
+        "analysis_status": (profile_analysis or {}).get("status") if isinstance(profile_analysis, dict) else "",
+        "candidate_profile": result.get("candidate_profile", {}),
+        "matching_profile": result.get("matching_profile", {}),
+        "ai_analysis_result": result.get("ai_analysis_result", {}),
+        "source_documents": result.get("source_documents", []),
+    }
+
+
+def local_match_comment(name, score, strengths, risks, next_actions, recommendation):
+    good = strengths[0] if strengths else "프로필과 맞는 키워드"
+    risk = risks[0] if risks else "원문 조건 확인"
+    actions = next_actions[:3] or ["공고 원문 확인", "경험 근거 보강", "지원 방향 정리"]
+    return "\n\n".join([
+        f"@{name} 님, 이 건은 {score}점 정도예요.",
+        f"보니까 {good} 쪽은 괜찮아요.\n근데 {risk} 부분은 한 번 더 확인하면 좋겠습니다.",
+        f"추천 방향은 \"{recommendation}\"으로 잡아보면 좋아 보여요.",
+        "보완하면 좋은 것\n\n" + "\n".join(f"{idx}. {item}" for idx, item in enumerate(actions, 1)),
+        "요렇게 진행해봅시다 !",
+    ])
+
+
+def local_match(job, profile=None, profile_analysis=None):
     profile = profile or {}
-    profile_text = " ".join(str(v) for v in profile.values()).lower()
+    result = profile_analysis_result(profile_analysis)
+    profile_text = " ".join(collect_text_values(profile) + collect_text_values(result)).lower()
     raw = job.get("raw") or {}
     job_terms = [
         job_title(job),
@@ -1438,14 +1821,67 @@ def local_match(job, profile=None):
         risks.append("경력 연차/직무 적합성 확인 필요")
     if not hits:
         risks.append("이력서/포트폴리오 키워드가 아직 부족함")
+    strengths = hits[:5] or ["프로필 DM에 이력서/포트폴리오를 넣으면 더 정확해집니다."]
+    next_actions = ["공고 DM에 자소서 초안을 남기기", "스레드에서 원문 확인", "관심/지원 후보 이모지로 분류"]
+    recommendation = f"{job_title(job) or '지원 직무'}에 맞춰 경험 근거를 정리하는 방향"
+    name = candidate_display_name(profile, result)
     return {
         "score": score,
         "summary": f"{job_company(job) or '선택한'} 공고는 {', '.join(hits[:4]) or '프로필 보강'} 키워드 기준으로 매칭했습니다.",
-        "strengths": hits[:5] or ["프로필 DM에 이력서/포트폴리오를 넣으면 더 정확해집니다."],
+        "strengths": strengths,
         "risks": risks or ["큰 리스크는 감지되지 않았습니다."],
-        "nextActions": ["공고 DM에 자소서 초안을 남기기", "스레드에서 원문 확인", "관심/지원 후보 이모지로 분류"],
+        "nextActions": next_actions,
+        "comment_text": local_match_comment(name, score, strengths, risks, next_actions, recommendation),
+        "recommendation_direction": recommendation,
+        "hasProfileAnalysis": profile_has_analysis(profile_analysis),
         "aiMode": "local heuristic",
     }
+
+
+def call_openai_match(job, profile=None, profile_analysis=None, baseline=None):
+    baseline = baseline or local_match(job, profile, profile_analysis)
+    result, model = call_openai_structured(
+        MATCH_ANALYSIS_PROMPT,
+        {
+            "candidate_name": candidate_display_name(profile, profile_analysis_result(profile_analysis)),
+            "user_profile": compact_profile_for_ai(profile, profile_analysis),
+            "job": compact_job_for_ai(job),
+            "local_baseline": baseline,
+            "slack_messages": job.get("slack_messages") or {},
+        },
+        "job_profile_match",
+        MATCH_ANALYSIS_SCHEMA,
+        max_output_tokens=3000,
+        timeout=45,
+    )
+    score = max(0, min(100, int(round(float(result.get("score", baseline.get("score", 0)))))))
+    return {
+        "score": score,
+        "summary": clean_text(result.get("summary")) or baseline.get("summary", ""),
+        "strengths": [clean_text(item) for item in (result.get("strengths") or baseline.get("strengths") or [])[:6] if clean_text(item)],
+        "risks": [clean_text(item) for item in (result.get("risks") or baseline.get("risks") or [])[:6] if clean_text(item)],
+        "nextActions": [clean_text(item) for item in (result.get("nextActions") or baseline.get("nextActions") or [])[:6] if clean_text(item)],
+        "comment_text": clean_text(result.get("comment_text")) or baseline.get("comment_text", ""),
+        "recommendation_direction": clean_text(result.get("recommendation_direction")) or baseline.get("recommendation_direction", ""),
+        "hasProfileAnalysis": profile_has_analysis(profile_analysis),
+        "aiMode": "openai",
+        "model": model,
+    }
+
+
+def match_job_with_profile(job, profile=None, profile_analysis=None):
+    baseline = local_match(job, profile, profile_analysis)
+    if not profile_has_analysis(profile_analysis):
+        return baseline
+    if not openai_api_key():
+        baseline["aiMode"] = "local heuristic - OPENAI_API_KEY missing"
+        return baseline
+    try:
+        return call_openai_match(job, profile, profile_analysis, baseline)
+    except Exception as exc:
+        baseline["aiMode"] = "local heuristic - OpenAI match fallback"
+        baseline["error"] = str(exc)
+        return baseline
 
 
 def local_search_intent(message):
@@ -1557,35 +1993,34 @@ def build_docs_payload():
             "roleCatalogPath": ROLE_CATALOG_PATH,
             "deployment": "vercel" if os.environ.get("VERCEL") else "local",
             "externalShare": "Vercel production URL" if os.environ.get("VERCEL") else f"ngrok http {port}",
-            "aiProvider": "OpenAI Responses API for one-time PDF profile analysis",
+            "aiProvider": "OpenAI Responses API for PDF profile analysis, job Slack message generation, and profile-job matching comments",
         },
         "features": [
             {"name": "JobKorea 공고 수집", "status": "implemented", "detail": "JobKorea Search HTML 내 Next.js hydration JSON에서 채용공고 content 배열 추출"},
-            {"name": "공고 JSON 원문 표시", "status": "implemented", "detail": "채널 공고 셀에 JSON_1 형태를 그대로 출력하고 slack_messages는 빈 문자열로 유지"},
+            {"name": "공고 Slack 메시지 변환", "status": "implemented", "detail": "JobKorea 공고 JSON을 OpenAI Responses API로 message_body/thread_comment 형식에 맞게 변환하고, API 키가 없으면 로컬 fallback 문장을 생성"},
             {"name": "동적 채널 관리", "status": "implemented", "detail": "직군 카탈로그를 카드 형태로 보여주고 선택한 채널 표시 상태를 브라우저 localStorage에 저장"},
             {"name": "이모지 공고 분류", "status": "implemented", "detail": "👀 관심 있음, ⭐ 지원 후보, 💰 연봉 좋음. 저장한 공고는 나중에 보기에서 태그별로 확인"},
             {"name": "웹 공고 URL 파싱", "status": "implemented", "detail": "URL fetch 후 title, 기간, 경력, 지역, 키워드, 상세 문단 추론. 저장은 브라우저 localStorage"},
             {"name": "공고별 DM 노트", "status": "implemented", "detail": "공고 DM/스레드 reply로 자소서 초안 및 메모를 브라우저 localStorage에 저장"},
             {"name": "PDF 이력서/포트폴리오 분석", "status": "implemented", "detail": "Resume & Portfolio DM에서 PDF만 업로드하고 OpenAI Responses API로 구조화 JSON을 생성한 뒤 브라우저 localStorage에 저장"},
-            {"name": "로컬 매칭 패널", "status": "implemented", "detail": "PDF 분석 JSON의 키워드와 공고 정보를 기반으로 로컬 매칭"},
+            {"name": "AI 매칭 패널", "status": "implemented", "detail": "PDF 분석 JSON이 있으면 OpenAI Responses API로 Slack 코멘트형 매칭 분석을 생성하고, 없으면 로컬 키워드 매칭으로 fallback"},
             {"name": "자연어 검색 DM", "status": "implemented", "detail": "문장에서 핵심 키워드 추출 후 JobKorea 검색"},
             {"name": "검색 봇 DM", "status": "implemented", "detail": "로컬 intent 파서 + JobKorea 크롤링 trace 표시"},
             {"name": "Vercel 배포", "status": "implemented", "detail": "public 정적 파일과 api/index.py Python 함수로 배포"},
             {"name": "ngrok 외부 공유", "status": "implemented", "detail": "scripts/start_ngrok.sh로 로컬 public URL 생성"},
-            {"name": "ChatGPT API 슬랙 메시지 변환", "status": "planned", "detail": "PROMPT_1로 공고 정보를 slack_messages.message_title/message_body로 변환 예정"},
         ],
         "apis": [
             {"method": "GET", "path": "/api/channels", "description": "직군 카탈로그 조회"},
-            {"method": "GET", "path": "/api/jobs?channel=pm", "description": "채널별 JobKorea 공고 검색"},
-            {"method": "GET", "path": "/api/search?q=NC", "description": "자연어/키워드 기반 JobKorea 검색"},
-            {"method": "GET", "path": "/api/parse?url=...", "description": "채용공고 URL 직접 파싱 결과 반환"},
+            {"method": "GET", "path": "/api/jobs?channel=pm", "description": "채널별 JobKorea 공고 검색 후 Slack 메시지 변환"},
+            {"method": "GET", "path": "/api/search?q=NC", "description": "자연어/키워드 기반 JobKorea 검색 후 Slack 메시지 변환"},
+            {"method": "GET", "path": "/api/parse?url=...", "description": "채용공고 URL 직접 파싱 후 Slack 메시지 변환"},
             {"method": "GET", "path": "/api/state", "description": "레거시 호환 기본 상태 반환"},
             {"method": "GET", "path": "/api/docs", "description": "문서 대시보드용 메타데이터"},
             {"method": "POST", "path": "/api/classify", "description": "레거시 호환. 실제 저장은 브라우저 localStorage"},
             {"method": "POST", "path": "/api/note", "description": "레거시 호환. 실제 저장은 브라우저 localStorage"},
             {"method": "POST", "path": "/api/profile", "description": "레거시 호환. 실제 저장은 브라우저 localStorage"},
             {"method": "POST", "path": "/api/profile/analyze-pdf", "description": "PDF 업로드 후 ChatGPT API 분석 JSON 반환"},
-            {"method": "POST", "path": "/api/match", "description": "브라우저가 보낸 프로필과 공고의 매칭 결과 생성"},
+            {"method": "POST", "path": "/api/match", "description": "브라우저가 보낸 프로필/PDF 분석 JSON과 공고의 AI 또는 fallback 매칭 결과 생성"},
             {"method": "POST", "path": "/api/channels", "description": "레거시 호환. 실제 저장은 브라우저 localStorage"},
             {"method": "POST", "path": "/api/ai-search", "description": "자연어 입력을 로컬 검색 의도로 해석하고 JobKorea 크롤링"},
         ],
@@ -1681,7 +2116,11 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json({"ok": True, "localOnly": True, "profile": payload.get("profile", {})})
             if parsed.path == "/api/match":
                 job = payload.get("job", {})
-                result = local_match(job, payload.get("profile") or {})
+                result = match_job_with_profile(
+                    job,
+                    payload.get("profile") or {},
+                    payload.get("profileAnalysis") or {},
+                )
                 return self.json({"match": result})
             if parsed.path == "/api/channels":
                 return self.json({"ok": True, "localOnly": True, **channel_payload(default_state())})

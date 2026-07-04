@@ -41,7 +41,7 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 
 - `public/index.html`: Slack 스타일 메인 UI
 - `public/styles.css`: Slack 스타일 레이아웃과 채널 관리 모달 스타일
-- `public/app.js`: 채널, DM, 스레드, 검색, 메모, 프로필, 로컬 매칭 렌더링
+- `public/app.js`: 채널, DM, 스레드, 검색, 메모, 프로필, Slack 메시지, AI/로컬 매칭 렌더링
 - `server.py`: API 서버, JobKorea 크롤링, URL 파싱, PDF 분석, 매칭 계산
 - `api/index.py`: Vercel Serverless Function 엔트리포인트
 - `vercel.json`: `/api/*` 요청을 Python 함수로 라우팅
@@ -62,7 +62,7 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 8. Resume & Portfolio 텍스트 저장
 9. 자연어 검색 DM
 10. 검색 봇 DM의 로컬 intent trace
-11. 프로필/공고 키워드 기반 로컬 매칭
+11. 프로필/공고 기반 AI 매칭 코멘트와 로컬 fallback 매칭
 12. Vercel 배포와 ngrok 로컬 임시 공유
 13. 채널 공고 셀에서 `JSON_1 공고 정보` 원문 표시
 
@@ -87,7 +87,7 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 | --- | --- | --- |
 | GET | `/api/channels` | 직군 카탈로그 조회 |
 | POST | `/api/channels` | 레거시 호환. 실제 채널 설정 저장은 브라우저 localStorage |
-| GET | `/api/jobs?channel=pm` | 채널 검색어로 JobKorea 공고 조회 |
+| GET | `/api/jobs?channel=pm` | 채널 검색어로 JobKorea 공고 조회 후 Slack 메시지 변환 |
 | GET | `/api/search?q=...` | 키워드 기반 JobKorea 검색 |
 | GET | `/api/parse?url=...` | 채용공고 URL 파싱 결과 반환. direct 채널 저장은 브라우저 localStorage |
 | GET | `/api/state` | 레거시 호환 기본 상태 반환 |
@@ -96,7 +96,7 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 | POST | `/api/note` | 레거시 호환. 실제 메모 저장은 브라우저 localStorage |
 | POST | `/api/profile` | 레거시 호환. 실제 프로필 저장은 브라우저 localStorage |
 | POST | `/api/profile/analyze-pdf` | PDF 업로드 후 OpenAI Responses API 분석 결과 반환 |
-| POST | `/api/match` | 브라우저가 보낸 프로필과 공고의 로컬 매칭 계산 |
+| POST | `/api/match` | 브라우저가 보낸 프로필/PDF 분석 JSON과 공고의 AI 또는 로컬 매칭 계산 |
 | POST | `/api/ai-search` | 기존 프론트 호환용 이름. 실제 동작은 로컬 검색 봇 |
 
 ## 6. 데이터 스펙
@@ -127,13 +127,20 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
     "deadline": "2026-07-13T13:00:00+09:00"
   },
   "slack_messages": {
-    "message_title": "",
-    "message_body": ""
+    "message_title": "현대오토에버㈜ 2026년 3분기 신입사원 모집 공유해요",
+    "message_body": "Slack 채널 본문용 공유 메시지",
+    "thread_comment": "스레드 첫 코멘트용 상세 요약",
+    "thread_summary": "짧은 스레드 요약",
+    "key_points": ["역할 성격: 서비스기획", "경험 기준: 신입"],
+    "ai_mode": "openai",
+    "model": "gpt-4o-mini",
+    "generated_at": "2026-07-04T14:00:00+09:00",
+    "error": ""
   }
 }
 ```
 
-`slack_messages`는 ChatGPT API 연동 전까지 빈 문자열로 유지한다.
+`slack_messages`는 OpenAI Responses API로 생성한다. API 키가 없거나 호출이 실패하면 동일 필드를 로컬 fallback 문장으로 채운다.
 
 브라우저 `localStorage`:
 
@@ -166,10 +173,6 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 
 ## 8. 추후 구현 필요 항목
 
-- `PROMPT_1 공고 정보 -> 슬랙 메세지 변환` 작성
-- 서버에서 공고 JSON을 ChatGPT API에 전달
-- 응답을 `slack_messages.message_title`, `slack_messages.message_body`에 저장
-- 채널 화면을 JSON 원문 표시에서 Slack 메시지 표시로 전환
 - 영구 저장이 필요할 경우 Vercel KV/Postgres/Supabase 같은 외부 저장소 연동
 
 ## 9. 검증 기준
@@ -178,8 +181,8 @@ ngrok이 출력하는 `Forwarding` URL도 사용할 수 있다.
 2. `app.js`, `dashboard.js`의 JS 문법 검사가 통과한다.
 3. `/api/channels`가 활성 채널과 직군 카탈로그를 반환한다.
 4. `/api/jobs?channel=pm`이 JobKorea 검색 결과 또는 fallback을 반환한다.
-5. `/api/jobs?channel=pm`의 각 공고에 빈 `slack_messages`가 포함된다.
-6. 채널 화면에서 공고 JSON이 그대로 표시된다.
+5. `/api/jobs?channel=pm`의 각 공고에 채워진 `slack_messages`가 포함된다.
+6. 채널 화면에서 Slack 메시지와 공고 JSON이 함께 표시된다.
 7. 채널 관리 모달에서 직군 채널을 표시/숨김할 수 있다.
 8. 사용자 채널을 추가/삭제할 수 있다.
 9. `vercel.json`이 `/api/*` 요청을 `api/index.py`로 라우팅한다.
