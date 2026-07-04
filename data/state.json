@@ -10,10 +10,39 @@
   "directParsedJobs": [],
   "enabledChannelIds": [
     "pm",
+    "planning",
     "ios",
-    "server",
-    "frontend",
-    "data"
+    "android",
+    "devops"
   ],
-  "customChannels": []
+  "customChannels": [],
+  "profileAnalysis": {
+    "status": "text_extracted",
+    "attempts": 3,
+    "locked": false,
+    "lastError": "OPENAI_API_KEY is not configured on the server",
+    "sourceDocument": {
+      "document_id": "profile_pdf_1783092031",
+      "document_type": "resume_portfolio",
+      "original_file_name": "임승섭-졸업예정증명서.pdf",
+      "file_format": "pdf",
+      "mime_type": "application/pdf",
+      "page_count": 1,
+      "text_extractor": "tesseract_ocr",
+      "extracted_text_char_count": 432,
+      "sent_to_ai_char_count": 432,
+      "truncated_for_ai": false,
+      "language": [
+        "ko",
+        "en"
+      ],
+      "parse_status": "success"
+    },
+    "extractedText": "[Page 1]\n문서확인번호 [ml] X057-CE22-5CD7-C202 01 제출처:Ｌ0전자 용도:회사제출용\ncE,\nWa 본 \\\n2024/04/05\n8 22: 28 &\n‘ S\n졸업예정증명서\n= —\n근 건 oOo oO ^\n성 BPE\n생 년 월 일 : 19994 1048 272\n전 공 : 수학\n컴퓨터공학\n졸업예정일자 : 20244 8월 208\nfe) 1 으 ZA 6\n위 사실을 증명합니다.\n2024 년 4 월 5 일\n서 강 대 학 교 S| SHS\ni=)\n« F010] 없으면 인정하지 않음. Sree\n본 POFSAALE 타임스탬프(시점확인도장)와 전자서명을 통해 원본 SAS 가지는 전자증명서로서, SYSS 사본입니다.\n\\00.060010000.000에서 위변조 OFS 검증하시기 바랍니다.(유효기간은 발급일로부터 1802!) (Adobe Acrobat Reader 권장)",
+    "convertedJsonText": "",
+    "result": "",
+    "model": "gpt-4o-mini",
+    "attemptedAt": "2026-07-04T00:20:31+09:00",
+    "completedAt": "2026-07-04T00:20:31+09:00"
+  }
 }
