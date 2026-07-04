@@ -436,11 +436,19 @@ async function loadJobs(channelId) {
   saveLocalState();
 }
 
-function render() {
+function render(options = {}) {
   renderSidebar();
-  if (state.activeMode === "channel") renderChannel();
-  else if (state.activeMode === "later") renderLater();
-  else renderDm();
+  if (state.activeMode === "channel") renderChannel(options);
+  else if (state.activeMode === "later") renderLater(options);
+  else renderDm(options);
+}
+
+function renderPreservingMessageScroll() {
+  const scrollTop = messageList.scrollTop;
+  render({ preserveMessageScroll: true });
+  requestAnimationFrame(() => {
+    messageList.scrollTop = scrollTop;
+  });
 }
 
 function renderSidebar() {
@@ -549,7 +557,7 @@ function openLaterView(reactionKey = state.activeLaterReaction) {
 window.JobKoreaVibeOpenLater = () => openLaterView();
 window.addEventListener("slezzuk:open-later", () => openLaterView());
 
-function renderChannel() {
+function renderChannel(options = {}) {
   const channel = currentChannel();
   const jobs = state.jobs[channel.id] || [];
   channelTitle.textContent = `# ${channel.name}`;
@@ -564,7 +572,7 @@ function renderChannel() {
       <div class="day-divider"><span>Parsed postings</span></div>
       ${jobs.length ? bottomAnchoredItems(jobs).map(renderJobMessage).join("") : emptyBlock("아직 파싱된 URL이 없습니다.")}
     `;
-    scrollToBottom(messageList);
+    if (!options.preserveMessageScroll) scrollToBottom(messageList);
     return;
   }
 
@@ -576,10 +584,10 @@ function renderChannel() {
     <div class="day-divider"><span>${channel.query} results</span></div>
     ${jobs.length ? bottomAnchoredItems(jobs).map(renderJobMessage).join("") : emptyBlock("공고를 불러오는 중입니다.")}
   `;
-  scrollToBottom(messageList);
+  if (!options.preserveMessageScroll) scrollToBottom(messageList);
 }
 
-function renderLater() {
+function renderLater(options = {}) {
   const groups = laterGroups();
   const total = savedJobIds().length;
   const activeGroup = groups.find((group) => group.reaction.key === state.activeLaterReaction) || groups[0];
@@ -609,7 +617,7 @@ function renderLater() {
       </div>
     </section>
   `;
-  scrollToTop(messageList);
+  if (!options.preserveMessageScroll) scrollToTop(messageList);
 }
 
 function laterGroups() {
@@ -795,12 +803,12 @@ function renderJobCard(job) {
   `;
 }
 
-function renderDm() {
+function renderDm(options = {}) {
   if (state.activeDm === "ai-search") renderAiSearchDm();
   else if (state.activeDm === "profile") renderProfileDm();
   else if (state.activeDm === "search") renderSearchDm();
   else renderJobDm(findJob(state.activeDm?.replace("job:", "")));
-  scrollToTop(messageList);
+  if (!options.preserveMessageScroll) scrollToTop(messageList);
 }
 
 function renderAiSearchDm() {
@@ -1469,7 +1477,7 @@ document.addEventListener("click", async (event) => {
     }
     reconcileSavedJobs();
     saveLocalState();
-    render();
+    renderPreservingMessageScroll();
     if (threadPanel.classList.contains("open") && String(state.selectedJob?.id) === String(jobId)) {
       await renderThread(findJob(jobId) || state.selectedJob);
     }
