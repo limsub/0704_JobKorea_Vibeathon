@@ -123,6 +123,8 @@ const state = {
   profileUploadError: "",
   profileSelectedFileName: "",
   selectedJob: null,
+  jobDmMatches: {},
+  jobDmMatchLoading: {},
   loading: false,
   searchBotMessages: [],
 };
@@ -1403,16 +1405,31 @@ function renderAnalyzeJobDm() {
 }
 
 function renderJobDm(job) {
-  if (!job) return;
+  if (!job) {
+    channelTitle.textContent = "Job DM";
+    channelSubtitle.textContent = "공고를 다시 열 수 없습니다.";
+    bookmarks.innerHTML = "";
+    messageList.innerHTML = emptyBlock("공고 데이터를 찾지 못했어요. 채널이나 검색 결과에서 다시 DM을 열어주세요.");
+    return;
+  }
   const sender = jobSender(job);
+  const jobId = String(job.id);
+  const shouldShowMatch = hasProfileAnalysisData();
+  const cachedMatch = cachedJobDmMatch(job);
+  const shouldLoadMatch = shouldShowMatch && !cachedMatch && !isJobDmMatchLoading(job);
   channelTitle.textContent = sender.name;
   channelSubtitle.textContent = `${jobCompany(job)} · ${jobTitle(job)} 메모`;
   if (memberCount) memberCount.textContent = "DM";
-  bookmarks.innerHTML = `<button class="bookmark">자소서 초안</button><button class="bookmark">면접 메모</button>`;
+  bookmarks.innerHTML = `<button class="bookmark">공고 브리핑</button><button class="bookmark">AI 매칭</button><button class="bookmark">내 메모</button>`;
   messageInput.placeholder = "이 공고에 대한 메모나 자소서 초안을 남기기";
   const notes = state.notes[job.id] || [];
   messageList.innerHTML = `
     ${renderThreadParentMessage(job)}
+    <div class="day-divider"><span>공고 브리핑</span></div>
+    ${renderJobDmBriefing(job)}
+    ${renderJobDmPrepReply(job)}
+    <div class="day-divider"><span>AI matching</span></div>
+    ${shouldShowMatch ? (cachedMatch ? renderMatch(cachedMatch) : renderMatchSkeleton()) : renderNoProfileMatchReply(job)}
     <div class="day-divider"><span>My notes</span></div>
     ${notes.length ? notes.map((note) => `
       <article class="message">
@@ -1422,6 +1439,117 @@ function renderJobDm(job) {
       </article>
     `).join("") : emptyBlock("아직 기록이 없습니다. composer에 자소서 초안/인재상/메모를 남겨보세요.")}
   `;
+  if (shouldLoadMatch) loadJobDmMatch(job, jobId);
+}
+
+function renderJobDmBriefing(job) {
+  const comment = jobSlackMessages(job).thread_comment || defaultDetails(job).join("\n");
+  return `
+    <article class="message job-dm-briefing-message">
+      <div class="message-avatar briefing-avatar">공</div>
+      <div class="message-content">
+        <div class="message-meta">
+          <span class="message-name">공고분석이</span>
+          <span class="message-time">세부 브리핑</span>
+        </div>
+        <div class="message-text">${escapeHtml(formatSlackText(comment))}</div>
+      </div>
+    </article>
+  `;
+}
+
+function renderJobDmPrepReply(job) {
+  const keywords = jobKeywords(job).slice(0, 5);
+  const keywordText = keywords.length ? keywords.join(", ") : "원문 키워드 확인 필요";
+  const location = jobLocation(job);
+  const period = jobPeriod(job);
+  const salary = jobRaw(job).salary || "공고 상세 참고";
+  const text = [
+    "이 DM은 개인 검토용으로 써도 좋아요.",
+    "바로 남겨두면 좋은 메모는 아래 정도입니다.",
+    "",
+    `1. 자소서 첫 문단: ${jobTitle(job)} 역할을 왜 보고 있는지`,
+    `2. 경험 연결: ${keywordText}`,
+    `3. 확인 필요: 위치 ${location}, 일정 ${period}, 처우 ${salary}`,
+    "",
+    "나중에 면접 준비할 때도 이 대화창에 질문/답변 초안을 이어서 남기면 됩니다.",
+  ].join("\n");
+  return `
+    <article class="message job-dm-prep-message">
+      <div class="message-avatar prep-avatar">메</div>
+      <div class="message-content">
+        <div class="message-meta">
+          <span class="message-name">메모도우미</span>
+          <span class="message-time">검토 가이드</span>
+        </div>
+        <div class="message-text">${escapeHtml(text)}</div>
+      </div>
+    </article>
+  `;
+}
+
+function renderNoProfileMatchReply() {
+  return `
+    <article class="message match-message">
+      <div class="message-avatar match-avatar">매</div>
+      <div class="message-content">
+        <div class="message-meta">
+          <span class="message-name">매칭분석이</span>
+          <span class="message-time">프로필 대기</span>
+        </div>
+        <div class="message-text match-comment">Resume & Portfolio DM에 이력서나 포트폴리오 PDF를 올리면, 이 자리에서 이 공고와 내 프로필의 매칭 점수와 보완 방향을 바로 붙여둘게요.</div>
+      </div>
+    </article>
+  `;
+}
+
+function jobDmMatchCacheKey(job) {
+  const analysis = state.profileAnalysis || {};
+  const result = analysis.result || {};
+  return [
+    job.id,
+    analysis.completedAt || "",
+    result.generated_at || "",
+    result.schema_version || "",
+    analysis.model || "",
+  ].join("|");
+}
+
+function cachedJobDmMatch(job) {
+  const jobId = String(job.id);
+  const cached = state.jobDmMatches[jobId];
+  return cached?.cacheKey === jobDmMatchCacheKey(job) ? cached.match : null;
+}
+
+function isJobDmMatchLoading(job) {
+  return state.jobDmMatchLoading[String(job.id)] === jobDmMatchCacheKey(job);
+}
+
+async function loadJobDmMatch(job, jobId = String(job.id)) {
+  const cacheKey = jobDmMatchCacheKey(job);
+  if (state.jobDmMatchLoading[jobId] === cacheKey || state.jobDmMatches[jobId]?.cacheKey === cacheKey) return;
+  state.jobDmMatchLoading[jobId] = cacheKey;
+  try {
+    const data = await api("/api/match", {
+      method: "POST",
+      body: JSON.stringify({ job, profile: state.profile, profileAnalysis: state.profileAnalysis }),
+    });
+    state.jobDmMatches[jobId] = { cacheKey, match: data.match };
+  } catch (err) {
+    state.jobDmMatches[jobId] = {
+      cacheKey,
+      match: {
+        score: 0,
+        comment_text: `매칭을 바로 계산하지 못했어요.\n${err.message}`,
+        strengths: [],
+        risks: [],
+        nextActions: [],
+      },
+    };
+  } finally {
+    delete state.jobDmMatchLoading[jobId];
+    if (state.activeMode === "dm" && state.activeDm === `job:${jobId}`) renderDm();
+  }
 }
 
 function renderAnalyzeJobTurn(turn) {

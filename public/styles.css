@@ -701,6 +701,16 @@ button.avatar-photo:hover {
   font-size: 13px;
 }
 
+.briefing-avatar {
+  background: #1264a3;
+  font-size: 18px;
+}
+
+.prep-avatar {
+  background: #007a5a;
+  font-size: 18px;
+}
+
 .message-content {
   min-width: 0;
 }
@@ -1811,6 +1821,11 @@ button.avatar-photo:hover {
 
 .analyze-url-reply .skeleton-message {
   padding: 10px 0 0;
+}
+
+.job-dm-briefing-message .message-text,
+.job-dm-prep-message .message-text {
+  max-width: 760px;
 }
 
 .attachment-thumb {
