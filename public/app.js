@@ -377,7 +377,6 @@ function render() {
   renderSidebar();
   if (state.activeMode === "channel") renderChannel();
   else renderDm();
-  scrollSlackSurfacesToBottom();
 }
 
 function renderSidebar() {
@@ -437,6 +436,7 @@ function renderChannel() {
       ${jobs.length ? bottomAnchoredItems(jobs).map(renderJobMessage).join("") : emptyBlock("아직 파싱된 URL이 없습니다.")}
     `;
     renderThread(jobs[0]);
+    scrollToBottom(messageList);
     return;
   }
 
@@ -453,6 +453,7 @@ function renderChannel() {
     ${jobs.length ? bottomAnchoredItems(jobs).map(renderJobMessage).join("") : emptyBlock("공고를 불러오는 중입니다.")}
   `;
   renderThread(state.selectedJob || jobs[0]);
+  scrollToBottom(messageList);
 }
 
 function channelIntro(channel, text) {
@@ -479,16 +480,22 @@ function bottomAnchoredItems(items = []) {
   return [...items].reverse();
 }
 
+function topAnchoredItems(items = []) {
+  return [...items];
+}
+
+function scrollToTop(element) {
+  if (!element) return;
+  requestAnimationFrame(() => {
+    element.scrollTop = 0;
+  });
+}
+
 function scrollToBottom(element) {
   if (!element) return;
   requestAnimationFrame(() => {
     element.scrollTop = element.scrollHeight;
   });
-}
-
-function scrollSlackSurfacesToBottom() {
-  scrollToBottom(messageList);
-  scrollToBottom(threadBody);
 }
 
 function renderJobMessage(job) {
@@ -545,11 +552,11 @@ function renderJobCard(job) {
 }
 
 function renderDm() {
-  if (state.activeDm === "ai-search") return renderAiSearchDm();
-  if (state.activeDm === "profile") return renderProfileDm();
-  if (state.activeDm === "search") return renderSearchDm();
-  const job = findJob(state.activeDm?.replace("job:", ""));
-  return renderJobDm(job);
+  if (state.activeDm === "ai-search") renderAiSearchDm();
+  else if (state.activeDm === "profile") renderProfileDm();
+  else if (state.activeDm === "search") renderSearchDm();
+  else renderJobDm(findJob(state.activeDm?.replace("job:", "")));
+  scrollToTop(messageList);
 }
 
 function renderAiSearchDm() {
@@ -570,7 +577,7 @@ function renderAiSearchDm() {
       </div>
     </section>
     <div id="aiSearchResults">
-      ${state.searchBotMessages.length ? bottomAnchoredItems(state.searchBotMessages).map(renderAiSearchTurn).join("") : emptyBlock("원하는 공고를 자연어로 입력해보세요.")}
+      ${state.searchBotMessages.length ? topAnchoredItems(state.searchBotMessages).map(renderAiSearchTurn).join("") : emptyBlock("원하는 공고를 자연어로 입력해보세요.")}
     </div>
   `;
   renderAiSearchThread();
@@ -725,7 +732,7 @@ function renderSearchDm() {
       <p>검색 문장을 보내면 로컬 서버가 핵심 키워드를 뽑아 JobKorea에서 검색하고, 결과를 DM 답장처럼 보여줍니다.</p>
     </section>
     <div id="searchDmResults">
-      ${state.searchBotMessages.length ? bottomAnchoredItems(state.searchBotMessages).map(renderSearchTurn).join("") : emptyBlock("원하는 공고를 자연어로 입력해보세요.")}
+      ${state.searchBotMessages.length ? topAnchoredItems(state.searchBotMessages).map(renderSearchTurn).join("") : emptyBlock("원하는 공고를 자연어로 입력해보세요.")}
     </div>
   `;
   renderSearchThread();
@@ -847,7 +854,7 @@ function renderSearchTurn(turn) {
         <div class="message-text">${escapeHtml(turn.response.answer)}</div>
         ${renderAiTrace(turn.response)}
         <div class="day-divider"><span>crawled jobs</span></div>
-        ${bottomAnchoredItems(turn.response.jobs || []).map(renderJobMessage).join("") || emptyBlock("검색 결과가 없습니다.")}
+        ${topAnchoredItems(turn.response.jobs || []).map(renderJobMessage).join("") || emptyBlock("검색 결과가 없습니다.")}
       </div>
     </article>
   `;
@@ -936,7 +943,7 @@ async function submitComposer(text) {
         jobs: [],
       },
     };
-    state.searchBotMessages.unshift(pending);
+    state.searchBotMessages.push(pending);
     render();
     const data = await api("/api/ai-search", { method: "POST", body: JSON.stringify({ message: text }) });
     pending.response = data;
@@ -954,7 +961,7 @@ async function submitComposer(text) {
         jobs: [],
       },
     };
-    state.searchBotMessages.unshift(pending);
+    state.searchBotMessages.push(pending);
     render();
     try {
       const data = await api("/api/ai-search", { method: "POST", body: JSON.stringify({ message: text }) });
