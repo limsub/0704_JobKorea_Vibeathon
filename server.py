@@ -69,6 +69,39 @@ DEFAULT_PROFILE_ANALYSIS = {
     "completedAt": "",
 }
 
+KEYWORD_INVENTORY_FIELDS = [
+    "all_keywords",
+    "role_keywords",
+    "domain_keywords",
+    "industry_keywords",
+    "technical_keywords",
+    "tool_keywords",
+    "methodology_keywords",
+    "business_keywords",
+    "data_keywords",
+    "product_keywords",
+    "project_keywords",
+    "achievement_keywords",
+    "soft_skill_keywords",
+    "seniority_keywords",
+    "education_keywords",
+    "certification_keywords",
+    "language_keywords",
+    "search_aliases",
+    "negative_or_gap_keywords",
+    "evidence_phrases",
+]
+
+KEYWORD_INVENTORY_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": KEYWORD_INVENTORY_FIELDS,
+    "properties": {
+        field: {"type": "array", "items": {"type": "string"}}
+        for field in KEYWORD_INVENTORY_FIELDS
+    },
+}
+
 PROFILE_ANALYSIS_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -312,6 +345,7 @@ PROFILE_ANALYSIS_SCHEMA = {
                 "primary_job_categories",
                 "recommended_job_titles",
                 "core_keywords",
+                "keyword_inventory",
                 "strong_match_signals",
                 "weak_match_signals",
                 "preferred_work_style",
@@ -320,6 +354,7 @@ PROFILE_ANALYSIS_SCHEMA = {
                 "primary_job_categories": {"type": "array", "items": {"type": "string"}},
                 "recommended_job_titles": {"type": "array", "items": {"type": "string"}},
                 "core_keywords": {"type": "array", "items": {"type": "string"}},
+                "keyword_inventory": KEYWORD_INVENTORY_SCHEMA,
                 "strong_match_signals": {"type": "array", "items": {"type": "string"}},
                 "weak_match_signals": {"type": "array", "items": {"type": "string"}},
                 "preferred_work_style": {
@@ -432,8 +467,13 @@ PROFILE_ANALYSIS_PROMPT = """
 - 텍스트에 근거가 있는 사실만 구조화한다.
 - 불명확하거나 없는 정보는 빈 문자열, 빈 배열, 0, unknown 중 가장 자연스러운 값으로 둔다.
 - evidence에는 원문에서 어떤 부분을 근거로 삼았는지 짧게 한국어로 적는다.
-- 매칭에 유용한 직무명, 기술 키워드, 강점/약점 신호를 적극적으로 정리한다.
-- ai_analysis_result는 채팅창에 바로 보여줄 수 있는 한국어 분석 결과로 작성한다.
+- 이 결과는 이후 수십 개 공고와 비교하는 내부 매칭 DB로 쓰인다. 짧게 요약하지 말고, 원문에 등장한 매칭 신호를 최대한 많이 구조화한다.
+- keyword_inventory에는 원문 표현을 최대한 보존해서 충분히 많이 넣는다. 직무명, 산업/도메인, 기술스택, 툴, 방법론, 프로젝트명, 성과 표현, 업무 동사, 협업 방식, 교육/자격/언어, 검색 별칭을 적극적으로 분류한다.
+- all_keywords는 다른 배열의 대표 키워드를 합친 넓은 검색용 배열이다. 중복은 줄이되, 서로 다른 표현(예: PM, PO, 서비스기획, Product Manager)은 별도 키워드로 유지한다.
+- evidence_phrases에는 매칭 근거가 되는 원문 구절을 10개 이상, 가능하면 20개 가까이 짧게 저장한다. 과장하지 말고 원문 기반으로 쓴다.
+- negative_or_gap_keywords에는 부족하거나 불명확한 신호도 저장한다. 예: 성과 수치 부족, 산업 경험 불명확, 경력 연차 불명확.
+- strong_match_signals와 weak_match_signals는 채용공고와 비교할 때 바로 쓸 수 있게 구체적으로 쓴다.
+- ai_analysis_result는 Slack DM에서 사람이 남긴 분석 메모처럼 자연스럽고 친화적인 한국어로 작성한다.
 - 개인정보는 원문에 있는 경우에만 추출한다.
 """.strip()
 
@@ -515,12 +555,15 @@ MATCH_ANALYSIS_PROMPT = """
 
 작성 원칙:
 - score는 0~100 사이 숫자다. 근거가 약하면 과감히 낮춘다.
-- comment_text는 Slack 스레드의 두 번째 코멘트처럼 쓴다.
-- comment_text 첫 줄은 가능하면 "@이름 님, 이 건은 76점 정도예요." 형식으로 쓴다.
-- 장점 1~2개, 부족한 점 1~2개, 추천 방향 1개, "보완하면 좋은 것" 번호 목록을 포함한다.
+- comment_text는 "매칭분석이"가 Slack 스레드에 직접 남기는 두 번째 댓글처럼 쓴다. 발화자 이름, "포트폴리오 매칭:" 같은 제목, JSON 느낌의 라벨은 쓰지 않는다.
+- comment_text는 공고별로 말투와 길이가 달라야 한다. 어떤 것은 짧은 실무 코멘트, 어떤 것은 꼼꼼한 코칭, 어떤 것은 가벼운 팀원 피드백처럼 자연스럽게 쓴다.
+- comment_text에는 점수, 실제로 겹치는 키워드/경험, 부족한 지점, 추천 방향, 다음에 보완할 문장/프로젝트 방향을 포함한다.
+- "좋아요/아쉬워요/다음 액션" 같은 고정 표를 반복하지 말고, 실제 사람이 보고 판단한 문장처럼 이어 쓴다.
+- 포트폴리오 keyword_inventory와 evidence_phrases를 적극적으로 사용해 근거를 풍부하게 만든다.
 - 포트폴리오/이력서에 없는 경험을 만들어내지 않는다.
 - 공고 정보가 애매하면 "원문 확인 필요"라고 쓴다.
-- 말투는 사용자가 준 예시처럼 부드럽고 실무적인 한국어로 쓴다.
+- 이모지는 실제 이모지로만 0~2개 사용한다. Slack shortcode 텍스트는 쓰지 않는다.
+- 말투는 부드럽고 실무적인 한국어로 쓴다.
 """.strip()
 
 JOB_MESSAGE_CACHE = {}
@@ -1120,15 +1163,399 @@ def call_openai_profile_analysis(extracted_text, document_type, source_document)
         "다음 PDF 추출 텍스트를 분석해 JSON으로 변환하세요.\n\n" + json.dumps(prompt, ensure_ascii=False),
         "resume_portfolio_profile",
         PROFILE_ANALYSIS_SCHEMA,
-        max_output_tokens=7000,
+        max_output_tokens=11000,
         timeout=90,
     )
     return parsed, model
 
 
+PROFILE_KEYWORD_STOPWORDS = {
+    "그리고", "하지만", "또한", "관련", "기반", "통해", "위해", "대한", "있는", "없는", "합니다",
+    "했습니다", "있습니다", "입니다", "프로젝트", "업무", "역할", "경험", "내용", "진행", "수행",
+    "작성", "관리", "지원", "활용", "제공", "구현", "확인", "필요", "가능", "중심", "결과",
+    "resume", "portfolio", "project", "experience", "work", "skill", "skills", "and", "with", "from",
+    "for", "the", "this", "that", "using", "based", "about",
+}
+
+PROFILE_KEYWORD_BUCKETS = {
+    "role_keywords": [
+        "PM", "PO", "Product Manager", "Product Owner", "서비스기획", "프로덕트 매니저", "프로덕트 오너",
+        "사업기획", "전략기획", "서비스 운영", "서비스기획자", "기획자", "데이터 분석가", "데이터 사이언티스트",
+        "백엔드", "프론트엔드", "서버개발", "iOS", "Android", "QA", "UX", "UI", "마케터", "브랜드",
+        "그로스", "운영", "컨설턴트", "개발자", "디자이너",
+    ],
+    "domain_keywords": [
+        "커머스", "이커머스", "쇼핑몰", "B2B", "B2C", "SaaS", "플랫폼", "마켓플레이스", "핀테크",
+        "헬스케어", "교육", "에듀테크", "게임", "콘텐츠", "AI", "데이터", "CRM", "결제", "물류",
+        "광고", "미디어", "커뮤니티", "구독", "모바일 앱", "웹 서비스", "엔터프라이즈",
+    ],
+    "industry_keywords": [
+        "IT", "소프트웨어", "게임", "애니메이션", "제조", "금융", "보험", "유통", "패션", "식품",
+        "뷰티", "바이오", "헬스케어", "교육", "부동산", "모빌리티", "여행", "숙박", "미디어",
+    ],
+    "technical_keywords": [
+        "Python", "Java", "JavaScript", "TypeScript", "React", "Next.js", "Vue", "Node.js", "Spring",
+        "Django", "FastAPI", "Flask", "SQL", "MySQL", "PostgreSQL", "MongoDB", "Redis", "API",
+        "REST", "GraphQL", "AWS", "GCP", "Azure", "Docker", "Kubernetes", "Git", "GitHub", "CI/CD",
+        "Swift", "Kotlin", "iOS", "Android", "Flutter", "React Native", "Tableau", "Power BI",
+        "머신러닝", "딥러닝", "LLM", "RAG", "NLP", "OpenAI", "데이터분석", "데이터 시각화",
+    ],
+    "tool_keywords": [
+        "Figma", "Notion", "Jira", "Confluence", "Slack", "Google Analytics", "GA4", "Amplitude",
+        "Mixpanel", "Firebase", "Excel", "Google Sheets", "Looker", "Tableau", "Power BI", "SQL",
+        "GitHub", "GitLab", "Zeplin", "Miro", "Asana", "Trello", "Photoshop", "Illustrator",
+    ],
+    "methodology_keywords": [
+        "애자일", "스크럼", "칸반", "MVP", "OKR", "KPI", "A/B 테스트", "유저 리서치", "VOC",
+        "UT", "인터뷰", "퍼널 분석", "코호트 분석", "가설 검증", "로드맵", "스프린트", "PRD",
+        "요구사항 정의", "IA", "와이어프레임", "프로토타입", "린스타트업",
+    ],
+    "business_keywords": [
+        "사업전략", "사업기획", "신사업", "시장조사", "경쟁사 분석", "매출", "수익화", "비즈니스 모델",
+        "운영지표", "고객경험", "CS", "영업", "제휴", "파트너십", "브랜딩", "캠페인", "CRM",
+        "리텐션", "전환율", "활성화", "온보딩", "가격정책", "그로스", "성과관리",
+    ],
+    "data_keywords": [
+        "데이터분석", "SQL", "지표", "대시보드", "로그 분석", "퍼널", "코호트", "리텐션", "전환율",
+        "매출 분석", "고객 세그먼트", "A/B 테스트", "통계", "실험", "모델링", "시각화", "KPI",
+    ],
+    "product_keywords": [
+        "서비스기획", "제품기획", "프로덕트", "로드맵", "백로그", "기능정의", "요구사항", "PRD",
+        "정책설계", "화면설계", "IA", "와이어프레임", "프로토타입", "UX", "사용자 여정",
+        "고객 문제", "문제정의", "출시", "런칭", "고도화", "개선",
+    ],
+    "achievement_keywords": [
+        "성과", "개선", "증가", "감소", "달성", "수상", "런칭", "출시", "도입", "자동화", "효율화",
+        "전환율", "리텐션", "매출", "MAU", "DAU", "CTR", "CVR", "NPS", "비용 절감", "시간 단축",
+    ],
+    "soft_skill_keywords": [
+        "커뮤니케이션", "협업", "리더십", "문제해결", "오너십", "논리적 사고", "분석적 사고",
+        "문서화", "설득", "조율", "발표", "퍼실리테이션", "고객 중심", "책임감", "실행력",
+    ],
+    "seniority_keywords": [
+        "신입", "주니어", "미들", "시니어", "리드", "팀장", "매니저", "인턴", "경력", "경력 1년",
+        "경력 3년", "경력 5년", "경력 7년", "경력 10년",
+    ],
+}
+
+PROFILE_KEYWORD_ALIASES = {
+    "PM": ["Product Manager", "프로덕트 매니저", "서비스기획"],
+    "PO": ["Product Owner", "프로덕트 오너", "서비스기획"],
+    "서비스기획": ["PM", "PO", "제품기획", "프로덕트"],
+    "데이터분석": ["SQL", "지표", "대시보드", "퍼널 분석"],
+    "사업기획": ["사업전략", "신사업", "비즈니스 모델"],
+    "iOS": ["Swift", "모바일 앱", "앱 개발"],
+    "백엔드": ["서버개발", "API", "데이터베이스"],
+    "프론트엔드": ["React", "웹 서비스", "UI 개발"],
+}
+
+
+def keyword_inventory_empty():
+    return {field: [] for field in KEYWORD_INVENTORY_FIELDS}
+
+
+def keyword_field_limit(field):
+    if field == "all_keywords":
+        return 260
+    if field == "evidence_phrases":
+        return 32
+    if field == "search_aliases":
+        return 120
+    return 110
+
+
+def normalize_keyword_item(value, max_length=48):
+    value = clean_text(value)
+    value = re.sub(r"^[•\-*\d\.\)\s]+", "", value).strip(" ,;/|·")
+    value = re.sub(r"\s+", " ", value)
+    if len(value) < 2 or len(value) > max_length:
+        return ""
+    if value.lower() in PROFILE_KEYWORD_STOPWORDS:
+        return ""
+    if re.fullmatch(r"[\W_]+", value):
+        return ""
+    return value
+
+
+def iter_keyword_items(source):
+    if source is None:
+        return
+    if isinstance(source, str):
+        yield source
+        return
+    if isinstance(source, dict):
+        for value in source.values():
+            yield from iter_keyword_items(value)
+        return
+    if isinstance(source, (list, tuple, set)):
+        for value in source:
+            yield from iter_keyword_items(value)
+        return
+    yield str(source)
+
+
+def merge_keywords(*sources, limit=120, max_length=48):
+    merged = []
+    seen = set()
+    for source in sources:
+        for item in iter_keyword_items(source):
+            keyword = normalize_keyword_item(item, max_length=max_length)
+            if not keyword:
+                continue
+            key = keyword.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(keyword)
+            if len(merged) >= limit:
+                return merged
+    return merged
+
+
+def extract_known_bucket_keywords(text, field):
+    lower = clean_text(text).lower()
+    return [keyword for keyword in PROFILE_KEYWORD_BUCKETS.get(field, []) if keyword.lower() in lower]
+
+
+def extract_keyword_candidates(text, limit=180):
+    text = clean_text(text)
+    known = []
+    for field in PROFILE_KEYWORD_BUCKETS:
+        known.extend(extract_known_bucket_keywords(text, field))
+    tokens = re.findall(r"[A-Za-z][A-Za-z0-9+#.\-/]{1,}|[가-힣][가-힣A-Za-z0-9+#.\-/]{1,}", text)
+    return merge_keywords(known, tokens, limit=limit)
+
+
+def extract_keyword_evidence(text, keywords=None, limit=24):
+    text = normalize_extracted_text(text)
+    keywords = [item.lower() for item in merge_keywords(keywords or [], limit=80)]
+    fragments = re.split(r"[\n\r]+|[•●▪◆]+", text)
+    selected = []
+    for fragment in fragments:
+        line = clean_text(fragment)
+        if len(line) < 12 or len(line) > 160:
+            continue
+        lower = line.lower()
+        keyword_hit = any(keyword in lower for keyword in keywords[:60])
+        signal_hit = bool(re.search(r"\d|%|성과|개선|증가|감소|런칭|출시|달성|수상|자동화|분석|기획|개발", line))
+        if keyword_hit or signal_hit:
+            selected.append(line)
+        if len(selected) >= limit:
+            break
+    return merge_keywords(selected, limit=limit, max_length=160)
+
+
+def keyword_inventory_from_text(text):
+    inventory = keyword_inventory_empty()
+    for field in PROFILE_KEYWORD_BUCKETS:
+        inventory[field] = merge_keywords(extract_known_bucket_keywords(text, field), limit=keyword_field_limit(field))
+    inventory["all_keywords"] = merge_keywords(
+        *[inventory[field] for field in PROFILE_KEYWORD_BUCKETS],
+        extract_keyword_candidates(text, limit=220),
+        limit=keyword_field_limit("all_keywords"),
+    )
+    aliases = []
+    for keyword in inventory["all_keywords"]:
+        aliases.extend(PROFILE_KEYWORD_ALIASES.get(keyword, []))
+    inventory["search_aliases"] = merge_keywords(aliases, limit=keyword_field_limit("search_aliases"))
+    inventory["evidence_phrases"] = extract_keyword_evidence(text, inventory["all_keywords"], limit=keyword_field_limit("evidence_phrases"))
+    return inventory
+
+
+def merge_keyword_inventory(*inventories):
+    merged = keyword_inventory_empty()
+    for inventory in inventories:
+        if not isinstance(inventory, dict):
+            continue
+        for field in KEYWORD_INVENTORY_FIELDS:
+            max_length = 160 if field == "evidence_phrases" else 48
+            merged[field] = merge_keywords(
+                merged.get(field, []),
+                inventory.get(field, []),
+                limit=keyword_field_limit(field),
+                max_length=max_length,
+            )
+    merged["all_keywords"] = merge_keywords(
+        merged["all_keywords"],
+        *[merged[field] for field in KEYWORD_INVENTORY_FIELDS if field not in {"all_keywords", "evidence_phrases", "negative_or_gap_keywords"}],
+        limit=keyword_field_limit("all_keywords"),
+    )
+    return merged
+
+
+def derive_inventory_from_ai_result(ai_result):
+    inventory = keyword_inventory_empty()
+    profile = ai_result.get("candidate_profile") or {}
+    matching = ai_result.get("matching_profile") or {}
+    analysis = ai_result.get("ai_analysis_result") or {}
+    career = profile.get("career") or {}
+    skills = profile.get("skills") or {}
+    projects = profile.get("projects") or []
+    experiences = profile.get("work_experiences") or []
+
+    recommended_roles = [
+        item.get("role", "")
+        for item in analysis.get("recommended_roles", [])
+        if isinstance(item, dict)
+    ]
+    inventory["role_keywords"] = merge_keywords(
+        matching.get("primary_job_categories", []),
+        matching.get("recommended_job_titles", []),
+        career.get("desired_roles", []),
+        career.get("current_or_recent_role", ""),
+        [item.get("position", "") for item in experiences if isinstance(item, dict)],
+        [item.get("role", "") for item in projects if isinstance(item, dict)],
+        recommended_roles,
+        limit=keyword_field_limit("role_keywords"),
+    )
+    inventory["industry_keywords"] = merge_keywords(
+        career.get("preferred_industries", []),
+        extract_known_bucket_keywords(" ".join(collect_text_values(profile)), "industry_keywords"),
+        limit=keyword_field_limit("industry_keywords"),
+    )
+    inventory["domain_keywords"] = merge_keywords(
+        matching.get("primary_job_categories", []),
+        extract_known_bucket_keywords(" ".join(collect_text_values(ai_result)), "domain_keywords"),
+        limit=keyword_field_limit("domain_keywords"),
+    )
+    inventory["technical_keywords"] = merge_keywords(
+        [item.get("name", "") for item in skills.get("technical_skills", []) if isinstance(item, dict)],
+        [item.get("tech_stack", []) for item in projects if isinstance(item, dict)],
+        [item.get("tech_stack", []) for item in experiences if isinstance(item, dict)],
+        extract_known_bucket_keywords(" ".join(collect_text_values(ai_result)), "technical_keywords"),
+        limit=keyword_field_limit("technical_keywords"),
+    )
+    inventory["tool_keywords"] = merge_keywords(
+        [item.get("name", "") for item in skills.get("tools", []) if isinstance(item, dict)],
+        extract_known_bucket_keywords(" ".join(collect_text_values(ai_result)), "tool_keywords"),
+        limit=keyword_field_limit("tool_keywords"),
+    )
+    inventory["methodology_keywords"] = merge_keywords(
+        extract_known_bucket_keywords(" ".join(collect_text_values(ai_result)), "methodology_keywords"),
+        limit=keyword_field_limit("methodology_keywords"),
+    )
+    inventory["business_keywords"] = merge_keywords(
+        extract_known_bucket_keywords(" ".join(collect_text_values(ai_result)), "business_keywords"),
+        limit=keyword_field_limit("business_keywords"),
+    )
+    inventory["data_keywords"] = merge_keywords(
+        extract_known_bucket_keywords(" ".join(collect_text_values(ai_result)), "data_keywords"),
+        limit=keyword_field_limit("data_keywords"),
+    )
+    inventory["product_keywords"] = merge_keywords(
+        extract_known_bucket_keywords(" ".join(collect_text_values(ai_result)), "product_keywords"),
+        limit=keyword_field_limit("product_keywords"),
+    )
+    project_text_values = []
+    for project in projects:
+        if isinstance(project, dict):
+            project_text_values.extend([
+                project.get("name", ""),
+                project.get("description", ""),
+                project.get("problem", ""),
+                project.get("solution", ""),
+                project.get("contribution", ""),
+            ])
+    inventory["project_keywords"] = merge_keywords(
+        project_text_values,
+        extract_keyword_candidates(" ".join(project_text_values), limit=80),
+        limit=keyword_field_limit("project_keywords"),
+    )
+    achievement_text_values = []
+    for item in experiences:
+        if isinstance(item, dict):
+            achievement_text_values.extend(item.get("achievements", []) or [])
+    for project in projects:
+        if isinstance(project, dict):
+            achievement_text_values.extend([project.get("impact", ""), project.get("contribution", "")])
+    inventory["achievement_keywords"] = merge_keywords(
+        extract_known_bucket_keywords(" ".join(achievement_text_values), "achievement_keywords"),
+        extract_keyword_candidates(" ".join(achievement_text_values), limit=80),
+        limit=keyword_field_limit("achievement_keywords"),
+    )
+    inventory["soft_skill_keywords"] = merge_keywords(
+        [item.get("name", "") for item in skills.get("soft_skills", []) if isinstance(item, dict)],
+        extract_known_bucket_keywords(" ".join(collect_text_values(ai_result)), "soft_skill_keywords"),
+        limit=keyword_field_limit("soft_skill_keywords"),
+    )
+    inventory["seniority_keywords"] = merge_keywords(
+        career.get("seniority_level", ""),
+        extract_known_bucket_keywords(" ".join(collect_text_values(ai_result)), "seniority_keywords"),
+        limit=keyword_field_limit("seniority_keywords"),
+    )
+    inventory["education_keywords"] = merge_keywords(
+        profile.get("education", []),
+        limit=keyword_field_limit("education_keywords"),
+    )
+    inventory["certification_keywords"] = merge_keywords(
+        profile.get("certifications", []),
+        limit=keyword_field_limit("certification_keywords"),
+    )
+    inventory["language_keywords"] = merge_keywords(
+        [item.get("name", "") for item in skills.get("languages", []) if isinstance(item, dict)],
+        limit=keyword_field_limit("language_keywords"),
+    )
+    inventory["negative_or_gap_keywords"] = merge_keywords(
+        matching.get("weak_match_signals", []),
+        [item.get("title", "") for item in analysis.get("risks_or_gaps", []) if isinstance(item, dict)],
+        [item.get("description", "") for item in analysis.get("risks_or_gaps", []) if isinstance(item, dict)],
+        limit=keyword_field_limit("negative_or_gap_keywords"),
+    )
+    inventory["evidence_phrases"] = extract_keyword_evidence(
+        " ".join(collect_text_values(ai_result)),
+        inventory["all_keywords"],
+        limit=keyword_field_limit("evidence_phrases"),
+    )
+    inventory["all_keywords"] = merge_keywords(
+        matching.get("core_keywords", []),
+        *[inventory[field] for field in KEYWORD_INVENTORY_FIELDS if field not in {"all_keywords", "evidence_phrases", "negative_or_gap_keywords"}],
+        extract_keyword_candidates(" ".join(collect_text_values(ai_result)), limit=180),
+        limit=keyword_field_limit("all_keywords"),
+    )
+    aliases = []
+    for keyword in inventory["all_keywords"]:
+        aliases.extend(PROFILE_KEYWORD_ALIASES.get(keyword, []))
+    inventory["search_aliases"] = merge_keywords(inventory["search_aliases"], aliases, limit=keyword_field_limit("search_aliases"))
+    return inventory
+
+
+def enrich_profile_analysis_result(ai_result, extracted_text):
+    if not isinstance(ai_result, dict):
+        ai_result = {}
+    matching = ai_result.setdefault("matching_profile", {})
+    existing_inventory = matching.get("keyword_inventory") if isinstance(matching.get("keyword_inventory"), dict) else {}
+    derived_inventory = derive_inventory_from_ai_result(ai_result)
+    text_inventory = keyword_inventory_from_text("\n".join([extracted_text or "", " ".join(collect_text_values(ai_result))]))
+    inventory = merge_keyword_inventory(existing_inventory, derived_inventory, text_inventory)
+    if not inventory["evidence_phrases"]:
+        inventory["evidence_phrases"] = extract_keyword_evidence(extracted_text, inventory["all_keywords"], limit=keyword_field_limit("evidence_phrases"))
+    matching["keyword_inventory"] = inventory
+    matching["core_keywords"] = merge_keywords(
+        matching.get("core_keywords", []),
+        inventory["role_keywords"],
+        inventory["product_keywords"],
+        inventory["business_keywords"],
+        inventory["data_keywords"],
+        inventory["technical_keywords"],
+        inventory["domain_keywords"],
+        inventory["industry_keywords"],
+        inventory["project_keywords"],
+        inventory["all_keywords"],
+        limit=90,
+    )
+    matching.setdefault("primary_job_categories", [])
+    matching.setdefault("recommended_job_titles", [])
+    matching.setdefault("strong_match_signals", [])
+    matching.setdefault("weak_match_signals", [])
+    matching.setdefault("preferred_work_style", {"remote": "", "employment_type": [], "location": []})
+    ai_result["matching_profile"] = matching
+    return ai_result
+
+
 def build_profile_text_from_analysis(result):
     profile = result.get("candidate_profile") or {}
     matching = result.get("matching_profile") or {}
+    inventory = matching.get("keyword_inventory") or {}
     analysis = result.get("ai_analysis_result") or {}
     technical = [
         skill.get("name", "")
@@ -1140,17 +1567,30 @@ def build_profile_text_from_analysis(result):
         for item in profile.get("projects", [])
         if item.get("name")
     ]
+    tools = [
+        tool.get("name", "")
+        for tool in ((profile.get("skills") or {}).get("tools") or [])
+        if tool.get("name")
+    ]
+    inventory_keywords = merge_keywords(
+        matching.get("core_keywords", []),
+        *[inventory.get(field, []) for field in KEYWORD_INVENTORY_FIELDS if field != "evidence_phrases"],
+        technical,
+        tools,
+        limit=260,
+    )
     return {
         "resume": "\n".join(filter(None, [profile.get("headline", ""), profile.get("summary", ""), analysis.get("overall_summary", "")])),
         "portfolio": ", ".join(projects),
-        "skills": ", ".join((matching.get("core_keywords") or []) + technical),
+        "skills": ", ".join(inventory_keywords),
         "preferences": ", ".join((matching.get("preferred_work_style") or {}).get("location") or []),
     }
 
 
 def wrap_profile_analysis_result(ai_result, source_document, extracted_text, model):
+    ai_result = enrich_profile_analysis_result(ai_result, extracted_text)
     return {
-        "schema_version": "resume_portfolio_profile.v1",
+        "schema_version": "resume_portfolio_profile.v2",
         "user_id": "local-user",
         "generated_at": iso_now(),
         "source_documents": [source_document],
@@ -1947,21 +2387,33 @@ def collect_text_values(value):
     return [str(value)]
 
 
+def profile_result_with_keyword_inventory(result, extracted_text=""):
+    if not isinstance(result, dict):
+        return {}
+    inventory = ((result.get("matching_profile") or {}).get("keyword_inventory") or {})
+    if inventory.get("all_keywords"):
+        return result
+    try:
+        return enrich_profile_analysis_result(result, extracted_text)
+    except Exception:
+        return result
+
+
 def profile_analysis_result(profile_analysis=None):
     if not isinstance(profile_analysis, dict):
         return {}
     result = profile_analysis.get("result")
     if isinstance(result, dict):
-        return result
+        return profile_result_with_keyword_inventory(result, profile_analysis.get("extractedText", ""))
     if isinstance(result, str) and result.strip().startswith("{"):
         try:
-            return json.loads(result)
+            return profile_result_with_keyword_inventory(json.loads(result), profile_analysis.get("extractedText", ""))
         except json.JSONDecodeError:
             return {}
     converted = profile_analysis.get("convertedJsonText")
     if isinstance(converted, str) and converted.strip().startswith("{"):
         try:
-            return json.loads(converted)
+            return profile_result_with_keyword_inventory(json.loads(converted), profile_analysis.get("extractedText", ""))
         except json.JSONDecodeError:
             return {}
     return {}
@@ -1997,72 +2449,198 @@ def compact_profile_for_ai(profile=None, profile_analysis=None):
     }
 
 
-def local_match_comment(name, score, strengths, risks, next_actions, recommendation):
-    good = strengths[0] if strengths else "프로필과 맞는 키워드"
-    risk = risks[0] if risks else "원문 조건 확인"
+def profile_keywords_for_match(profile=None, profile_result=None):
+    profile_result = profile_result or {}
+    matching = profile_result.get("matching_profile") or {}
+    inventory = matching.get("keyword_inventory") or {}
+    inventory_terms = []
+    for field in KEYWORD_INVENTORY_FIELDS:
+        if field in {"evidence_phrases", "negative_or_gap_keywords"}:
+            continue
+        inventory_terms.extend(inventory.get(field, []) or [])
+    raw_text = " ".join(collect_text_values(profile or {}) + collect_text_values(profile_result))
+    return merge_keywords(
+        matching.get("core_keywords", []),
+        inventory_terms,
+        extract_keyword_candidates(raw_text, limit=240),
+        limit=320,
+    )
+
+
+def job_keywords_for_match(job):
+    raw_text = " ".join(collect_text_values(compact_job_for_ai(job)))
+    return merge_keywords(
+        job_title(job),
+        job_company(job),
+        job_keywords(job),
+        extract_keyword_candidates(raw_text, limit=180),
+        limit=220,
+    )
+
+
+def keyword_hits(profile_terms, job_terms, job_text):
+    hits = []
+    job_keys = {normalize_keyword_item(item).lower() for item in job_terms if normalize_keyword_item(item)}
+    job_text = clean_text(job_text).lower()
+    for term in profile_terms:
+        keyword = normalize_keyword_item(term)
+        if not keyword:
+            continue
+        key = keyword.lower()
+        if key in PROFILE_KEYWORD_STOPWORDS or len(key) < 2:
+            continue
+        exact_or_nested = key in job_text or any(
+            key == job_key or (len(key) >= 3 and (key in job_key or job_key in key))
+            for job_key in job_keys
+        )
+        if exact_or_nested and keyword.lower() not in [item.lower() for item in hits]:
+            hits.append(keyword)
+        if len(hits) >= 18:
+            break
+    return hits
+
+
+def extract_required_years(career_text):
+    career_text = clean_text(career_text)
+    values = [int(item) for item in re.findall(r"(\d+)\s*년", career_text)]
+    if not values and re.search(r"신입|무관", career_text):
+        return 0
+    return min(values) if values else None
+
+
+def candidate_years_from_result(profile_result):
+    try:
+        value = ((profile_result.get("candidate_profile") or {}).get("career") or {}).get("total_years_of_experience")
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def has_quantified_profile_signal(profile=None, profile_result=None):
+    text = " ".join(collect_text_values(profile or {}) + collect_text_values(profile_result or {}))
+    return bool(re.search(r"\d|%|배|건|명|원|억|만|증가|감소|개선|달성|런칭|출시", text))
+
+
+def normalize_match_comment_text(value):
+    text = clean_text(value)
+    text = re.sub(r"^(매칭분석이|포트폴리오\s*매칭|매칭\s*분석)\s*[:：]\s*", "", text)
+    return text
+
+
+def local_match_comment(job, score, strengths, risks, next_actions, recommendation):
+    company = job_company(job) or "이 공고"
+    title = job_title(job) or "해당 역할"
+    good = strengths[0] if strengths else "프로필에서 바로 잡히는 강점은 아직 많지 않아요"
+    risk = risks[0] if risks else "원문 조건은 한 번 더 확인하면 좋겠습니다"
     actions = next_actions[:3] or ["공고 원문 확인", "경험 근거 보강", "지원 방향 정리"]
-    seed = f"{name}|{score}|{good}|{risk}|{recommendation}"
-    opener = stable_pick(seed + "match-opener", [
-        f"@{name} 님, 이 건은 {score}점 정도예요.",
-        f"@{name} 님 기준으로 보면 대략 {score}점 근처로 보여요.",
-        f"@{name} 님, 요 건은 {score}점 정도로 보고 있습니다.",
-    ])
-    body = stable_pick(seed + "match-body", [
-        f"보니까 {good} 쪽은 괜찮아요.\n근데 {risk} 부분은 한 번 더 확인하면 좋겠습니다.",
-        f"{good} 포인트는 꽤 연결됩니다.\n반대로 {risk} 쪽은 메시지를 조금 더 보강하면 좋아요.",
-        f"현재 자료 기준으로는 {good}이 장점이고,\n{risk}은 지원 전에 체크할 부분으로 보여요.",
-    ])
-    close = stable_pick(seed + "match-close", [
-        "요렇게 진행해봅시다 !",
-        "이 방향이면 자소서/포폴 문장도 꽤 잡기 쉬울 것 같아요.",
-        "먼저 이 세 가지만 보완해보면 좋겠습니다.",
-    ])
-    return "\n\n".join([
-        opener,
-        body,
-        f"추천 방향은 \"{recommendation}\"으로 잡아보면 좋아 보여요.",
-        "보완하면 좋은 것\n\n" + "\n".join(f"{idx}. {item}" for idx, item in enumerate(actions, 1)),
-        close,
-    ])
+    seed = f"{company}|{title}|{score}|{good}|{risk}|{recommendation}"
+    variants = [
+        "\n\n".join([
+            f"이 건은 제가 보기엔 {score}점 정도예요.",
+            f"{good}\n다만 {risk}",
+            f"방향은 {recommendation} 쪽으로 잡으면 좋겠습니다.",
+            "바로 보완할 건 이 정도예요.\n" + "\n".join(f"{idx}. {item}" for idx, item in enumerate(actions, 1)),
+        ]),
+        "\n\n".join([
+            f"{company} 건은 {score}점으로 봤어요. 완전 자동 합격권이라기보단, 포트폴리오 문장만 잘 맞추면 꽤 설득 가능한 쪽입니다.",
+            f"좋은 신호는 {good}",
+            f"걸리는 건 {risk} 이 부분이고요.",
+            f"추천 포지셔닝은 \"{recommendation}\"입니다. {actions[0]}부터 먼저 잡아보면 좋아요.",
+        ]),
+        "\n\n".join([
+            f"점수로는 {score}점 정도. 👀",
+            f"{title} 기준으로 보면 {good}",
+            f"반대로 {risk}은 면접/자소서에서 질문 나올 수 있어요.",
+            "저라면 아래 순서로 정리할 것 같아요.\n" + "\n".join(f"- {item}" for item in actions),
+        ]),
+        "\n\n".join([
+            f"이건 조금 현실적으로 보면 {score}점입니다.",
+            f"{good}라서 출발점은 나쁘지 않은데, {risk}",
+            f"그래서 지원 메시지는 {recommendation}으로 좁히는 게 좋아 보여요. 너무 넓게 쓰면 공고랑 연결이 약해질 수 있습니다.",
+        ]),
+        "\n\n".join([
+            f"{company} / {title} 매칭은 {score}점 근처로 체크했습니다.",
+            f"프로필에서 바로 가져올 수 있는 근거는 {good}",
+            f"보완 포인트는 {risk}",
+            "다음 액션은 길게 잡지 말고, " + " / ".join(actions[:2]) + " 정도부터 가면 될 듯해요.",
+        ]),
+        "\n\n".join([
+            f"요 건은 {score}점. 숫자만 보면 중상 정도인데, 핵심은 공고가 보는 언어로 포트폴리오를 다시 번역하는 거예요.",
+            f"현재 자료에서는 {good}",
+            f"아쉬운 쪽은 {risk}",
+            f"한 줄 방향은 이렇게요: {recommendation}",
+        ]),
+    ]
+    return stable_pick(seed + "local-match-comment", variants)
 
 
 def local_match(job, profile=None, profile_analysis=None):
     profile = profile or {}
     result = profile_analysis_result(profile_analysis)
-    profile_text = " ".join(collect_text_values(profile) + collect_text_values(result)).lower()
+    profile_text_values = collect_text_values(profile) + collect_text_values(result)
+    profile_text = " ".join(profile_text_values).lower()
     raw = job.get("raw") or {}
-    job_terms = [
+    job_terms = job_keywords_for_match(job)
+    job_text = " ".join([
         job_title(job),
         job_company(job),
         raw.get("career", ""),
         raw.get("location", ""),
+        raw.get("salary", ""),
+        raw.get("period", ""),
         " ".join(job_keywords(job)),
-    ]
-    job_text = " ".join(job_terms).lower()
-    hits = []
-    for token in re.split(r"[,/\s]+", profile_text):
-        token = token.strip().lower()
-        if len(token) >= 2 and token in job_text and token not in hits:
-            hits.append(token)
-    score = min(96, 52 + len(hits) * 8)
+        raw.get("raw_text", ""),
+    ]).lower()
+    profile_terms = profile_keywords_for_match(profile, result)
+    hits = keyword_hits(profile_terms, job_terms, job_text)
+    has_analysis = profile_has_analysis(profile_analysis)
+    required_years = extract_required_years(raw.get("career", ""))
+    candidate_years = candidate_years_from_result(result)
+    score = 36 + (16 if has_analysis else 0) + min(36, len(hits) * 5)
     risks = []
-    if "경력" in clean_text((job.get("raw") or {}).get("career")) and "경력" not in profile_text:
-        risks.append("경력 연차/직무 적합성 확인 필요")
+    if required_years and candidate_years is None:
+        score -= 5
+        risks.append(f"공고는 경력 {required_years}년 이상 흐름인데, 포트폴리오에서 총 연차가 선명하지 않아요")
+    elif required_years and candidate_years < required_years:
+        score -= 10
+        risks.append(f"공고는 경력 {required_years}년 이상으로 보이는데, 현재 분석된 연차는 {candidate_years:g}년입니다")
+    elif required_years is not None and candidate_years is not None and candidate_years >= required_years:
+        score += 5
+    if not has_quantified_profile_signal(profile, result):
+        score -= 4
+        risks.append("성과 수치나 규모가 더 보이면 설득력이 올라갈 것 같아요")
     if not hits:
-        risks.append("이력서/포트폴리오 키워드가 아직 부족함")
-    strengths = hits[:5] or ["프로필 DM에 이력서/포트폴리오를 넣으면 더 정확해집니다."]
-    next_actions = ["공고 DM에 자소서 초안을 남기기", "스레드에서 원문 확인", "관심/지원 후보 이모지로 분류"]
-    recommendation = f"{job_title(job) or '지원 직무'}에 맞춰 경험 근거를 정리하는 방향"
-    name = candidate_display_name(profile, result)
+        score -= 12
+        risks.append("공고 핵심어와 포트폴리오 키워드가 아직 많이 겹치지는 않아요")
+    score = max(18, min(96, int(round(score))))
+    hit_text = ", ".join(hits[:6])
+    strengths = []
+    if hits:
+        strengths.append(f"겹치는 키워드가 있습니다: {hit_text}")
+    if any(item.lower() in profile_text for item in ["프로젝트", "런칭", "출시", "개선", "분석", "기획"]):
+        strengths.append("프로젝트/업무 경험을 공고 언어로 재정리할 재료가 있어요")
+    if has_analysis:
+        evidence = (((result.get("matching_profile") or {}).get("keyword_inventory") or {}).get("evidence_phrases") or [])[:1]
+        if evidence:
+            strengths.append(f"근거 문구도 잡혀 있습니다: {evidence[0]}")
+    strengths = strengths or ["프로필 DM에 이력서/포트폴리오를 올리면 매칭 근거를 더 촘촘히 볼 수 있어요"]
+    risks = merge_keywords(risks, limit=5, max_length=110) or ["큰 리스크는 아직 뚜렷하지 않지만, 원문 조건 확인은 필요해요"]
+    primary_hit = hits[0] if hits else (job_keywords(job)[0] if job_keywords(job) else job_title(job) or "직무")
+    next_actions = [
+        f"{primary_hit} 경험을 첫 문단에 배치하기",
+        "성과를 숫자/범위/사용자 영향으로 한 번 더 쓰기",
+        "공고 원문에서 팀/근무지/우대조건 확인하기",
+    ]
+    recommendation = f"{job_title(job) or '지원 직무'}에 맞춰 {primary_hit} 근거를 앞세우는 방향"
     return {
         "score": score,
-        "summary": f"{job_company(job) or '선택한'} 공고는 {', '.join(hits[:4]) or '프로필 보강'} 키워드 기준으로 매칭했습니다.",
+        "summary": f"{job_company(job) or '선택한'} 공고는 {hit_text or '프로필 보강'} 키워드와 경력/성과 신호를 같이 봐서 매칭했습니다.",
         "strengths": strengths,
-        "risks": risks or ["큰 리스크는 감지되지 않았습니다."],
+        "risks": risks,
         "nextActions": next_actions,
-        "comment_text": local_match_comment(name, score, strengths, risks, next_actions, recommendation),
+        "comment_text": local_match_comment(job, score, strengths, risks, next_actions, recommendation),
         "recommendation_direction": recommendation,
-        "hasProfileAnalysis": profile_has_analysis(profile_analysis),
+        "hasProfileAnalysis": has_analysis,
         "aiMode": "local heuristic",
     }
 
@@ -2090,7 +2668,7 @@ def call_openai_match(job, profile=None, profile_analysis=None, baseline=None):
         "strengths": [clean_text(item) for item in (result.get("strengths") or baseline.get("strengths") or [])[:6] if clean_text(item)],
         "risks": [clean_text(item) for item in (result.get("risks") or baseline.get("risks") or [])[:6] if clean_text(item)],
         "nextActions": [clean_text(item) for item in (result.get("nextActions") or baseline.get("nextActions") or [])[:6] if clean_text(item)],
-        "comment_text": clean_text(result.get("comment_text")) or baseline.get("comment_text", ""),
+        "comment_text": normalize_match_comment_text(result.get("comment_text")) or baseline.get("comment_text", ""),
         "recommendation_direction": clean_text(result.get("recommendation_direction")) or baseline.get("recommendation_direction", ""),
         "hasProfileAnalysis": profile_has_analysis(profile_analysis),
         "aiMode": "openai",

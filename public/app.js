@@ -5,6 +5,26 @@ const LOCAL_STATE_VERSION = 5;
 const INITIAL_JOB_BATCH_SIZE = 4;
 const FULL_JOB_BATCH_SIZE = 10;
 const SKELETON_JOB_COUNT = 4;
+const PROFILE_KEYWORD_FIELDS = [
+  "role_keywords",
+  "domain_keywords",
+  "industry_keywords",
+  "technical_keywords",
+  "tool_keywords",
+  "methodology_keywords",
+  "business_keywords",
+  "data_keywords",
+  "product_keywords",
+  "project_keywords",
+  "achievement_keywords",
+  "soft_skill_keywords",
+  "seniority_keywords",
+  "education_keywords",
+  "certification_keywords",
+  "language_keywords",
+  "search_aliases",
+  "all_keywords",
+];
 
 const DEFAULT_ENABLED_CHANNEL_IDS = ["pm"];
 const DUMMY_JOB_AVATARS = [
@@ -1229,10 +1249,33 @@ function profileAnalysisStatusLabel(analysis = {}) {
   return "분석 대기";
 }
 
+function uniqueTextItems(items = [], limit = 72) {
+  const result = [];
+  const seen = new Set();
+  items.flat(Infinity).forEach((item) => {
+    const value = String(item ?? "").replace(/\s+/g, " ").trim();
+    const key = value.toLowerCase();
+    if (!value || seen.has(key)) return;
+    seen.add(key);
+    result.push(value);
+  });
+  return result.slice(0, limit);
+}
+
+function profileKeywordInventory(result = {}, limit = 72) {
+  const matching = result.matching_profile || {};
+  const inventory = matching.keyword_inventory || {};
+  return uniqueTextItems([
+    matching.core_keywords || [],
+    ...PROFILE_KEYWORD_FIELDS.map((field) => inventory[field] || []),
+  ], limit);
+}
+
 function renderProfileAnalysisResult(analysis) {
   const result = analysis.result && typeof analysis.result === "object" ? analysis.result : {};
   const display = result.ai_analysis_result?.chat_display_message || {};
-  const keywords = result.matching_profile?.core_keywords || [];
+  const keywords = profileKeywordInventory(result, 80);
+  const evidence = result.matching_profile?.keyword_inventory?.evidence_phrases || [];
   if (!result.schema_version && analysis.status === "text_extracted") {
     return `
       <article class="message profile-result-message">
@@ -1249,16 +1292,24 @@ function renderProfileAnalysisResult(analysis) {
     `;
   }
   return `
-    <article class="message profile-result-message">
-      <div class="message-avatar" style="background:#007a5a">AI</div>
+      <article class="message profile-result-message">
+      <div class="message-avatar" style="background:#007a5a">분</div>
       <div class="message-content">
         <div class="message-meta">
-          <span class="message-name">${escapeHtml(display.title || "프로필 분석 메모")}</span>
-          <span class="message-time">${escapeHtml(result.generated_at || "")}</span>
+          <span class="message-name">${escapeHtml(display.title || "프로필분석이")}</span>
+          <span class="message-time">${keywords.length ? `${keywords.length}개 키워드` : escapeHtml(result.generated_at || "")}</span>
         </div>
         <div class="message-text">${escapeHtml(display.summary || result.ai_analysis_result?.overall_summary || "분석 결과를 공고 매칭에 반영할 준비가 됐어요.")}</div>
         ${display.bullets?.length ? `<ul class="profile-result-bullets">${display.bullets.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
-        ${keywords.length ? `<div class="thread-keywords">${keywords.slice(0, 8).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+        ${keywords.length ? `
+          <div class="profile-keyword-label">공고 매칭에 쓸 키워드를 넓게 저장했어요</div>
+          <div class="thread-keywords profile-keyword-cloud">${keywords.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>
+        ` : ""}
+        ${evidence.length ? `
+          <div class="profile-evidence-list">
+            ${evidence.slice(0, 3).map((item) => `<p>${escapeHtml(item)}</p>`).join("")}
+          </div>
+        ` : ""}
       </div>
     </article>
   `;
@@ -1394,7 +1445,7 @@ function renderProfileThread() {
   const analysis = state.profileAnalysis || {};
   const result = analysis.result && typeof analysis.result === "object" ? analysis.result : {};
   const message = result.ai_analysis_result?.chat_display_message || {};
-  const keywords = result.matching_profile?.core_keywords || [];
+  const keywords = profileKeywordInventory(result, 36);
   const extractedText = profileExtractedText(analysis);
   threadChannel.textContent = "# profile";
   threadBody.innerHTML = `
@@ -1403,7 +1454,7 @@ function renderProfileThread() {
       <section class="profile-thread-summary">
         <strong>${escapeHtml(message.title || "AI 분석 결과")}</strong>
         <p>${escapeHtml(message.summary || result.ai_analysis_result?.overall_summary || "")}</p>
-        <div class="thread-keywords">${keywords.slice(0, 8).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>
+        <div class="thread-keywords">${keywords.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>
       </section>
       <div class="empty-thread">이 분석은 공고 스레드의 매칭 코멘트에 반영됩니다.</div>
     ` : extractedText ? `
@@ -1461,23 +1512,22 @@ function defaultDetails(job) {
 
 function renderMatch(match) {
   const score = Math.max(0, Math.min(100, Math.round(Number(match.score || 0))));
-  const comment = match.comment_text || [
+  const fallbackComment = [
     match.summary,
     (match.strengths || []).length ? `좋아 보이는 부분: ${(match.strengths || []).join(", ")}` : "",
     (match.risks || []).length ? `확인할 부분: ${(match.risks || []).join(", ")}` : "",
+    (match.nextActions || []).length ? `다음 액션\n${(match.nextActions || []).slice(0, 3).map((item, index) => `${index + 1}. ${item}`).join("\n")}` : "",
   ].filter(Boolean).join("\n\n");
+  const comment = match.comment_text || fallbackComment;
   return `
     <article class="message match-message">
-      <div class="message-avatar match-avatar">ME</div>
+      <div class="message-avatar match-avatar">매</div>
       <div class="message-content">
         <div class="message-meta">
-          <span class="message-name">포트폴리오 매칭</span>
-          <span class="message-time">${score}점</span>
+          <span class="message-name">매칭분석이</span>
+          <span class="message-time">${score}점 · 매칭 메모</span>
         </div>
-        <div class="match-comment">${escapeHtml(formatSlackText(comment))}</div>
-        ${(match.nextActions || []).length ? `
-          <div class="thread-keywords">${(match.nextActions || []).slice(0, 3).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>
-        ` : ""}
+        <div class="message-text match-comment">${escapeHtml(formatSlackText(comment))}</div>
       </div>
     </article>
   `;
