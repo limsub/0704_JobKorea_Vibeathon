@@ -480,7 +480,7 @@ SLACK_JOB_MESSAGE_PROMPT = """
 - 공고마다 문장 시작, 길이, 이모지, 말투를 다르게 쓴다. 같은 템플릿을 반복하지 않는다.
 - 톤은 팀 리드의 업무 공유, 후배의 가벼운 제보, 대표의 전체 공지, 실무자의 짧은 체크, 길게 해석한 메모처럼 후보군이 충분히 달라야 한다.
 - "채용공고 안내"처럼 공고문 말투를 피하고, 실제 Slack에서 동료에게 공유하는 메모처럼 쓴다.
-- 이모지는 :eyes:, :memo:, :bulb:, :mag:, :sparkles: 중 상황에 맞게 0~2개만 쓴다.
+- 이모지는 👀, 📝, 💡, 🔍, ✨ 같은 실제 이모지로만 0~2개 쓴다. :memo: 같은 Slack shortcode 텍스트는 쓰지 않는다.
 - key_points는 역할 성격, 주요 키워드, 산업군, 경험 기준, 확인 기한, 급여/위치 중 중요한 것만 4~7개로 쓴다.
 - 각 결과의 id는 입력 job id와 정확히 같아야 한다.
 """.strip()
@@ -1491,7 +1491,7 @@ def local_slack_message(job, error=""):
     salary = clean_text(raw.get("salary")) or "급여 확인 필요"
     period = clean_text(raw.get("period")) or clean_text(profile.get("deadline")) or "마감일 확인 필요"
     seed = f"{company}|{title}|{period}|{keyword_text}"
-    emoji = stable_pick(seed, [":eyes:", ":memo:", ":bulb:", ":mag:", ":sparkles:", ""])
+    emoji = stable_pick(seed, ["👀", "📝", "💡", "🔍", "✨", ""])
     primary_keyword = keyword_text.split(",")[0].strip() or "직무"
     message_variants = [
         {
@@ -1538,7 +1538,7 @@ def local_slack_message(job, error=""):
             "body": "\n\n".join([
                 f"{primary_keyword} 보시는 분들만 가볍게 확인해 주세요.",
                 f"{company} 건이고, {career} 기준입니다.",
-                "스레드에 핵심만 적어놨습니다 :memo:",
+                "스레드에 핵심만 적어놨습니다 📝",
             ]),
         },
         {
@@ -1611,7 +1611,7 @@ def local_slack_message(job, error=""):
             "body": "\n\n".join([
                 f"{company} 쪽 업무 흐름을 보면 {primary_keyword}만 단독으로 보는 건 아닌 듯합니다.",
                 f"{keyword_text}가 같이 있어서, 실행/분석/운영 사이를 오가는 역할일 가능성이 있어요.",
-                "원문 기준으로 더 확인해야 하지만, 방향성은 참고할 만합니다 :bulb:",
+                "원문 기준으로 더 확인해야 하지만, 방향성은 참고할 만합니다 💡",
             ]),
         },
         {

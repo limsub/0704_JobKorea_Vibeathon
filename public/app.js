@@ -1,7 +1,7 @@
 const API = "";
 const MAX_PROFILE_PDF_BYTES = 40 * 1024 * 1024;
 const LOCAL_STATE_KEY = "slezzuk_local_state_v1";
-const LOCAL_STATE_VERSION = 4;
+const LOCAL_STATE_VERSION = 5;
 const INITIAL_JOB_BATCH_SIZE = 4;
 const FULL_JOB_BATCH_SIZE = 10;
 const SKELETON_JOB_COUNT = 4;
@@ -24,6 +24,24 @@ const DUMMY_JOB_AVATARS = [
   { bg: "#eaf1f8", skin: "#d8a17d", hair: "#202c33", shirt: "#0f6b8f", mark: "N" },
   { bg: "#fff4e5", skin: "#ba7656", hair: "#29170f", shirt: "#b7791f", mark: "O" },
   { bg: "#fce7f3", skin: "#e7ad91", hair: "#111827", shirt: "#be185d", mark: "P" },
+];
+const DUMMY_SENDERS = [
+  { name: "Seungyeon LJ", title: "Talent" },
+  { name: "Minji Kim", title: "PM Lead" },
+  { name: "Joon Park", title: "Ops" },
+  { name: "Hannah Choi", title: "Strategy" },
+  { name: "Daniel K", title: "Product" },
+  { name: "Yuna Lee", title: "Growth" },
+  { name: "Alex Han", title: "Recruiting" },
+  { name: "Soojin Bae", title: "Data" },
+  { name: "Mason Ryu", title: "Biz" },
+  { name: "Nari Jung", title: "People" },
+  { name: "Chris Oh", title: "Research" },
+  { name: "Eunseo Lim", title: "Planning" },
+  { name: "Jay Moon", title: "PO" },
+  { name: "Lina Seo", title: "Brand" },
+  { name: "Hyun Woo", title: "Lead" },
+  { name: "Grace Shin", title: "Careers" },
 ];
 const DEFAULT_PROFILE = {
   resume: "",
@@ -189,6 +207,17 @@ function avatarSvgDataUrl(avatar) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
+function formatSlackText(value = "") {
+  const emojiMap = {
+    ":eyes:": "👀",
+    ":memo:": "📝",
+    ":bulb:": "💡",
+    ":mag:": "🔍",
+    ":sparkles:": "✨",
+  };
+  return String(value ?? "").replace(/:eyes:|:memo:|:bulb:|:mag:|:sparkles:/g, (token) => emojiMap[token] || token);
+}
+
 function decorateJobs(channelId, jobs = []) {
   const used = new Set();
   return jobs.map((job, index) => {
@@ -201,17 +230,24 @@ function decorateJobs(channelId, jobs = []) {
     return {
       ...job,
       avatar: job.avatar || DUMMY_JOB_AVATARS[avatarIndex],
+      sender: job.sender || DUMMY_SENDERS[stableIndex(`${seed}:sender`, DUMMY_SENDERS.length)],
     };
   });
 }
 
 function jobAvatar(job) {
-  return job?.avatar || DUMMY_JOB_AVATARS[stableIndex(job?.id || jobCompany(job), DUMMY_JOB_AVATARS.length)];
+  const seed = job?.id || (job ? jobCompany(job) : "job");
+  return job?.avatar || DUMMY_JOB_AVATARS[stableIndex(seed, DUMMY_JOB_AVATARS.length)];
+}
+
+function jobSender(job) {
+  const seed = job?.id || (job ? jobCompany(job) : "job");
+  return job?.sender || DUMMY_SENDERS[stableIndex(`${seed}:sender`, DUMMY_SENDERS.length)];
 }
 
 function renderAvatarElement(job, attrs = "", tag = "button") {
   const avatar = jobAvatar(job);
-  const label = escapeHtml(jobCompany(job));
+  const label = escapeHtml(jobSender(job).name);
   const src = avatarSvgDataUrl(avatar);
   return `<${tag} class="message-avatar avatar-photo" ${attrs} aria-label="${label} 프로필"><img src="${src}" alt="" /></${tag}>`;
 }
@@ -256,6 +292,9 @@ function readLocalState() {
         parsed.channelJobs = {};
       }
       if ((parsed.version || 1) < 4) {
+        parsed.channelJobs = {};
+      }
+      if ((parsed.version || 1) < 5) {
         parsed.channelJobs = {};
       }
       parsed.version = LOCAL_STATE_VERSION;
@@ -693,7 +732,7 @@ function renderSidebar() {
   state.openJobDmIds = state.openJobDmIds.filter((jobId) => jobs.has(String(jobId)));
   const jobDms = state.openJobDmIds.map((jobId) => {
     const job = jobs.get(String(jobId));
-    return { id: `job:${job.id}`, name: jobCompany(job), job };
+    return { id: `job:${job.id}`, name: `${jobSender(job).name} · ${jobCompany(job)}`, job };
   });
   const fixed = [
     { id: "search", name: "Search", icon: "⌕" },
@@ -933,6 +972,7 @@ function loadingStatusText(loading = {}) {
   if (loading.phase === "refresh") return "기존 공고는 유지하고 새 결과를 뒤에서 확인 중입니다.";
   if (loading.phase === "more") return "나머지 공고를 이어서 채우는 중입니다.";
   if (loading.phase === "profile") return "PDF를 읽고 프로필 키워드를 정리하는 중입니다.";
+  if (loading.phase === "search") return "자연어 요청을 공고 검색어로 바꾸고 결과를 정리하는 중입니다.";
   return "JobKorea에서 공고를 가져오는 중입니다.";
 }
 
@@ -990,20 +1030,24 @@ function scrollToBottom(element) {
   });
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function renderJobMessage(job) {
   const jobId = String(job.id);
   const selected = selectedClassifications(jobId);
   const isThreadSelected = threadPanel.classList.contains("open") && String(state.selectedJob?.id) === jobId;
-  const company = jobCompany(job);
+  const sender = jobSender(job);
   return `
     <article class="message job-message ${isThreadSelected ? "thread-selected" : ""}" data-job="${escapeHtml(jobId)}" tabindex="0" aria-label="${escapeHtml(jobCompany(job))} 공고 스레드 열기">
-      ${renderAvatarElement(job, `data-open-dm="${escapeHtml(jobId)}"`)}
+      ${renderAvatarElement(job, `data-open-dm="${escapeHtml(jobId)}" title="DM에 추가"`)}
       <div class="message-content">
         <div class="message-meta">
-          <button class="message-name" data-open-dm="${escapeHtml(jobId)}">${escapeHtml(company)}</button>
-          <span class="message-time">${escapeHtml(jobSource(job))}</span>
+          <button class="message-name" data-open-dm="${escapeHtml(jobId)}">${escapeHtml(sender.name)}</button>
+          <span class="message-time">${escapeHtml(sender.title)} · ${escapeHtml(jobCompany(job))}</span>
         </div>
-        <div class="message-text">${escapeHtml(jobMessageText(job))}</div>
+        <div class="message-text">${escapeHtml(formatSlackText(jobMessageText(job)))}</div>
         ${renderJobCard(job)}
         <div class="reactions">
           ${reactionTypes.map((reaction) => `
@@ -1018,7 +1062,7 @@ function renderJobMessage(job) {
         </button>
       </div>
       <div class="message-actions">
-        <button title="DM" data-open-dm="${escapeHtml(jobId)}">💬</button>
+        <button title="DM에 추가" data-open-dm="${escapeHtml(jobId)}">💬</button>
         <button title="Thread" data-thread-job="${escapeHtml(jobId)}">↪</button>
         <button title="Open" data-open-url="${escapeHtml(jobUrl(job))}">↗</button>
       </div>
@@ -1041,25 +1085,45 @@ function renderJobCard(job) {
       </div>
       ${keyPoints.length ? `<div class="job-roles">${keyPoints.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
       <div class="job-card-footer">
-        <span>${escapeHtml(slack.thread_summary || "스레드에서 상세 내용과 매칭을 확인하세요.")}</span>
+        <span>${escapeHtml(formatSlackText(slack.thread_summary || "스레드에서 상세 내용과 매칭을 확인하세요."))}</span>
         <a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">원문 열기</a>
       </div>
     </div>
   `;
 }
 
-function renderSlackThreadComment(job) {
-  const slack = jobSlackMessages(job);
-  const comment = slack.thread_comment || defaultDetails(job).join("\n");
+function renderThreadParentMessage(job) {
+  const jobId = String(job.id);
+  const sender = jobSender(job);
   return `
-    <article class="message slack-thread-comment thread-comment-primary">
-      ${renderAvatarElement(job, "", "div")}
+    <article class="message thread-parent-message">
+      ${renderAvatarElement(job, `data-open-dm="${escapeHtml(jobId)}" title="DM에 추가"`)}
       <div class="message-content">
         <div class="message-meta">
-          <span class="message-name">${escapeHtml(jobCompany(job))}</span>
-          <span class="message-time">공고 메모</span>
+          <button class="message-name" data-open-dm="${escapeHtml(jobId)}">${escapeHtml(sender.name)}</button>
+          <span class="message-time">${escapeHtml(sender.title)} · ${escapeHtml(jobCompany(job))}</span>
         </div>
-        <div class="message-text">${escapeHtml(comment)}</div>
+        <div class="message-text">${escapeHtml(formatSlackText(jobMessageText(job)))}</div>
+        ${renderJobCard(job)}
+      </div>
+    </article>
+  `;
+}
+
+function renderThreadDetailComment(job) {
+  const slack = jobSlackMessages(job);
+  const comment = slack.thread_comment || defaultDetails(job).join("\n");
+  const sender = jobSender(job);
+  const jobId = String(job.id);
+  return `
+    <article class="message slack-thread-comment thread-reply-message">
+      ${renderAvatarElement(job, `data-open-dm="${escapeHtml(jobId)}" title="DM에 추가"`)}
+      <div class="message-content">
+        <div class="message-meta">
+          <button class="message-name" data-open-dm="${escapeHtml(jobId)}">${escapeHtml(sender.name)}</button>
+          <span class="message-time">댓글 · 상세 메모</span>
+        </div>
+        <div class="message-text">${escapeHtml(formatSlackText(comment))}</div>
       </div>
     </article>
   `;
@@ -1239,14 +1303,15 @@ function renderSearchDm() {
 
 function renderJobDm(job) {
   if (!job) return;
-  channelTitle.textContent = jobCompany(job);
-  channelSubtitle.textContent = "공고 담당자 DM처럼 쓰는 개인 기록 공간";
+  const sender = jobSender(job);
+  channelTitle.textContent = sender.name;
+  channelSubtitle.textContent = `${jobCompany(job)} · ${jobTitle(job)} 메모`;
   if (memberCount) memberCount.textContent = "DM";
   bookmarks.innerHTML = `<button class="bookmark">자소서 초안</button><button class="bookmark">면접 메모</button>`;
   messageInput.placeholder = "이 공고에 대한 메모나 자소서 초안을 남기기";
   const notes = state.notes[job.id] || [];
   messageList.innerHTML = `
-    ${renderJobMessage(job)}
+    ${renderThreadParentMessage(job)}
     <div class="day-divider"><span>My notes</span></div>
     ${notes.length ? notes.map((note) => `
       <article class="message">
@@ -1301,7 +1366,9 @@ async function renderThread(job) {
   const shouldShowMatch = hasProfileAnalysisData();
   threadChannel.textContent = `# ${threadScope}`;
   threadBody.innerHTML = `
-    ${renderSlackThreadComment(job)}
+    ${renderThreadParentMessage(job)}
+    <div class="thread-reply-divider"><span>${shouldShowMatch ? "2" : "1"} replies</span></div>
+    ${renderThreadDetailComment(job)}
     ${shouldShowMatch ? `<div id="matchResult">${renderMatchSkeleton()}</div>` : ""}
   `;
   scrollToTop(threadBody);
@@ -1370,12 +1437,15 @@ function renderSearchTurn(turn) {
       <div class="message-content">
         <div class="message-meta"><span class="message-name">Search</span><span class="message-time">${running ? "검색 중" : `${jobs.length} results`}</span></div>
         <div class="message-text">${escapeHtml(running ? "관련 공고를 찾는 중입니다." : jobs.length ? `${jobs.length}개의 관련 공고를 찾았어요.` : "조건에 맞는 공고를 찾지 못했어요. 회사명이나 직무명을 조금 더 넓게 입력해보세요.")}</div>
-        ${running ? "" : `
-          <div class="day-divider"><span>검색 결과</span></div>
-          ${topAnchoredItems(jobs).map(renderJobMessage).join("") || emptyBlock("검색 결과가 없습니다.")}
-        `}
+        ${running ? renderLoadingBar({ phase: "search" }) : ""}
       </div>
     </article>
+    ${running ? "" : `
+      <div class="day-divider search-result-divider"><span>검색 결과</span></div>
+      <div class="search-result-feed">
+        ${topAnchoredItems(jobs).map(renderJobMessage).join("") || emptyBlock("검색 결과가 없습니다.")}
+      </div>
+    `}
   `;
 }
 
@@ -1404,7 +1474,7 @@ function renderMatch(match) {
           <span class="message-name">포트폴리오 매칭</span>
           <span class="message-time">${score}점</span>
         </div>
-        <div class="match-comment">${escapeHtml(comment)}</div>
+        <div class="match-comment">${escapeHtml(formatSlackText(comment))}</div>
         ${(match.nextActions || []).length ? `
           <div class="thread-keywords">${(match.nextActions || []).slice(0, 3).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>
         ` : ""}
@@ -1456,7 +1526,10 @@ async function submitComposer(text) {
     };
     state.searchBotMessages.push(pending);
     render();
-    const data = await api("/api/ai-search", { method: "POST", body: JSON.stringify({ message: text }) });
+    const [data] = await Promise.all([
+      api("/api/ai-search", { method: "POST", body: JSON.stringify({ message: text }) }),
+      delay(750),
+    ]);
     pending.response = data;
     render();
     return;
@@ -1475,7 +1548,10 @@ async function submitComposer(text) {
     state.searchBotMessages.push(pending);
     render();
     try {
-      const data = await api("/api/ai-search", { method: "POST", body: JSON.stringify({ message: text }) });
+      const [data] = await Promise.all([
+        api("/api/ai-search", { method: "POST", body: JSON.stringify({ message: text }) }),
+        delay(750),
+      ]);
       pending.response = data;
       state.jobs.search = data.jobs || [];
     } catch (err) {
