@@ -864,14 +864,6 @@ function renderChannel(options = {}) {
   }
 
   messageList.innerHTML = `
-    ${channelIntro(channel, "관심 직무의 채용공고를 Slack 메시지처럼 모아봤어요. 자세한 내용은 공고 스레드에서 확인할 수 있습니다.")}
-    <div class="job-toolbar">
-      <div>
-        <strong>${jobs.length ? `${jobs.length}개 먼저 표시 중` : "공고를 준비 중입니다"}</strong>
-        <span>${loading.loading ? loadingStatusText(loading) : "새 공고가 있으면 새로고침으로 확인할 수 있어요."}</span>
-      </div>
-      <button data-refresh="${channel.id}" ${loading.loading ? "disabled" : ""}>${loading.loading ? "불러오는 중" : "JobKorea 새로고침"}</button>
-    </div>
     ${loading.loading ? renderLoadingBar(loading) : ""}
     <div class="day-divider"><span>채용공고</span></div>
     ${jobs.length ? bottomAnchoredItems(jobs).map(renderJobMessage).join("") : loading.loading ? renderJobSkeletons(SKELETON_JOB_COUNT) : emptyBlock(loading.error || "아직 표시할 공고가 없습니다.")}
@@ -2098,12 +2090,6 @@ document.addEventListener("click", async (event) => {
     state.activeDm = dmButton.dataset.dm;
     closeThreadPanel();
     render();
-    return;
-  }
-
-  const refresh = event.target.closest("[data-refresh]");
-  if (refresh) {
-    loadJobsProgressive(refresh.dataset.refresh, { force: true });
     return;
   }
 
