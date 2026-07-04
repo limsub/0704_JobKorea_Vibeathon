@@ -351,6 +351,16 @@ button {
   color: rgba(255, 255, 255, 0.56);
 }
 
+.later-filter-row .row-icon {
+  width: 24px;
+}
+
+.later-filter-emoji {
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+}
+
 .sidebar-count {
   display: inline-grid;
   place-items: center;

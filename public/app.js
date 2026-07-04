@@ -462,22 +462,7 @@ function renderSidebar() {
 
   const compactSection = document.querySelector(".sidebar-section.compact");
   if (compactSection) {
-    compactSection.innerHTML = `
-      <button class="sidebar-row">
-        <span class="row-icon">▣</span>
-        <span class="row-label">Threads</span>
-        <span class="sidebar-count">3</span>
-      </button>
-      <button class="sidebar-row">
-        <span class="row-icon">@</span>
-        <span class="row-label">Mentions & reactions</span>
-        <span class="sidebar-count urgent">2</span>
-      </button>
-      <button class="sidebar-row">
-        <span class="row-icon">⌁</span>
-        <span class="row-label">Drafts & sent</span>
-      </button>
-    `;
+    compactSection.innerHTML = state.activeMode === "later" ? renderLaterSidebarRows() : renderDefaultSidebarRows();
   }
 
   const jobDms = Object.values(state.jobs).flat().slice(0, 12).map((job) => ({
@@ -504,6 +489,36 @@ function renderSidebar() {
   `).join("");
 
   renderRailState();
+}
+
+function renderDefaultSidebarRows() {
+  return `
+    <button class="sidebar-row">
+      <span class="row-icon">▣</span>
+      <span class="row-label">Threads</span>
+      <span class="sidebar-count">3</span>
+    </button>
+    <button class="sidebar-row">
+      <span class="row-icon">@</span>
+      <span class="row-label">Mentions & reactions</span>
+      <span class="sidebar-count urgent">2</span>
+    </button>
+    <button class="sidebar-row">
+      <span class="row-icon">⌁</span>
+      <span class="row-label">Drafts & sent</span>
+    </button>
+  `;
+}
+
+function renderLaterSidebarRows() {
+  const groups = laterGroups();
+  return groups.map((group) => `
+    <button class="sidebar-row later-filter-row ${group.reaction.key === state.activeLaterReaction ? "active" : ""}" data-later-reaction="${group.reaction.key}">
+      <span class="row-icon later-filter-emoji">${group.reaction.emoji}</span>
+      <span class="row-label">${escapeHtml(group.reaction.label)}</span>
+      <span class="sidebar-count">${group.jobs.length}</span>
+    </button>
+  `).join("");
 }
 
 function renderRailState() {
