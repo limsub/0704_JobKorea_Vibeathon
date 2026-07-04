@@ -1563,7 +1563,7 @@ def build_docs_payload():
             {"name": "JobKorea 공고 수집", "status": "implemented", "detail": "JobKorea Search HTML 내 Next.js hydration JSON에서 채용공고 content 배열 추출"},
             {"name": "공고 JSON 원문 표시", "status": "implemented", "detail": "채널 공고 셀에 JSON_1 형태를 그대로 출력하고 slack_messages는 빈 문자열로 유지"},
             {"name": "동적 채널 관리", "status": "implemented", "detail": "직군 카탈로그를 카드 형태로 보여주고 선택한 채널 표시 상태를 브라우저 localStorage에 저장"},
-            {"name": "이모지 공고 분류", "status": "implemented", "detail": "👀 관심 있음, ⭐ 지원 후보, ❌ 패스, 💰 연봉 좋음"},
+            {"name": "이모지 공고 분류", "status": "implemented", "detail": "👀 관심 있음, ⭐ 지원 후보, 💰 연봉 좋음. 저장한 공고는 나중에 보기에서 태그별로 확인"},
             {"name": "웹 공고 URL 파싱", "status": "implemented", "detail": "URL fetch 후 title, 기간, 경력, 지역, 키워드, 상세 문단 추론. 저장은 브라우저 localStorage"},
             {"name": "공고별 DM 노트", "status": "implemented", "detail": "공고 DM/스레드 reply로 자소서 초안 및 메모를 브라우저 localStorage에 저장"},
             {"name": "PDF 이력서/포트폴리오 분석", "status": "implemented", "detail": "Resume & Portfolio DM에서 PDF만 업로드하고 OpenAI Responses API로 구조화 JSON을 생성한 뒤 브라우저 localStorage에 저장"},

@@ -43,9 +43,13 @@ button {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 72px 278px minmax(360px, 1fr) 360px;
+  grid-template-columns: 72px 278px minmax(360px, 1fr) 0;
   grid-template-rows: 40px minmax(0, 1fr);
   height: 100vh;
+}
+
+.app-shell.thread-open {
+  grid-template-columns: 72px 278px minmax(360px, 1fr) 360px;
 }
 
 .topbar {
@@ -664,6 +668,21 @@ button {
   transition: 120ms ease;
 }
 
+.job-message {
+  cursor: pointer;
+}
+
+.job-message:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+  background: #f4f9ff;
+}
+
+.job-message.thread-selected {
+  background: #f4f9ff;
+  box-shadow: inset 3px 0 var(--blue);
+}
+
 .message-actions button {
   width: 32px;
   height: 30px;
@@ -701,6 +720,49 @@ button {
   color: #0b4c7b;
   background: #eaf5ff;
   font-weight: 900;
+}
+
+.later-intro .intro-icon {
+  color: #fff;
+  background: var(--yellow);
+  border-color: #d8a01f;
+  font-size: 30px;
+}
+
+.later-group {
+  padding: 10px 0 18px;
+  border-top: 1px solid #ededed;
+}
+
+.later-group-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 22px 8px;
+}
+
+.later-group-header > span {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  font-size: 22px;
+}
+
+.later-group-header h3 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.25;
+}
+
+.later-group-header p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .job-toolbar {
@@ -1348,11 +1410,15 @@ button {
 .thread-panel {
   grid-column: 4;
   grid-row: 2;
-  display: grid;
+  display: none;
   grid-template-rows: 64px minmax(0, 1fr) 54px;
   min-width: 0;
   border-left: 1px solid var(--border);
   background: #fff;
+}
+
+.thread-panel.open {
+  display: grid;
 }
 
 .thread-header {
@@ -1727,20 +1793,27 @@ button {
     grid-template-columns: 64px 260px minmax(0, 1fr);
   }
 
+  .app-shell.thread-open {
+    grid-template-columns: 64px 260px minmax(0, 1fr);
+  }
+
   .thread-panel {
     position: fixed;
     top: 40px;
     right: 0;
     bottom: 0;
     z-index: 10;
+    display: grid;
     width: min(380px, 92vw);
     transform: translateX(100%);
     transition: transform 180ms ease;
+    pointer-events: none;
   }
 
   .thread-panel.open {
     transform: translateX(0);
     box-shadow: -16px 0 42px rgba(0, 0, 0, 0.16);
+    pointer-events: auto;
   }
 }
 

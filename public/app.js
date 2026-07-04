@@ -37,15 +37,16 @@ let channels = [];
 const reactionTypes = [
   { key: "watch", emoji: "👀", label: "관심 있음" },
   { key: "candidate", emoji: "⭐", label: "지원 후보" },
-  { key: "pass", emoji: "❌", label: "패스" },
   { key: "salary", emoji: "💰", label: "연봉 좋음" },
 ];
+const validReactionKeys = new Set(reactionTypes.map((reaction) => reaction.key));
 
 const state = {
   activeMode: "channel",
   activeChannel: "pm",
   activeDm: null,
   jobs: { direct: [] },
+  savedJobs: {},
   channelCatalog: [],
   enabledChannelIds: [],
   customChannels: [],
@@ -61,6 +62,9 @@ const state = {
   searchBotMessages: [],
 };
 
+let threadRenderToken = 0;
+
+const appShell = document.querySelector(".app-shell");
 const channelList = document.querySelector("#channels");
 const directList = document.querySelector("#directs");
 const messageList = document.querySelector("#messageList");
@@ -150,6 +154,7 @@ function defaultLocalState() {
     profile: clone(DEFAULT_PROFILE),
     profileAnalysis: clone(DEFAULT_PROFILE_ANALYSIS),
     directParsedJobs: [],
+    savedJobs: {},
     enabledChannelIds: [...DEFAULT_ENABLED_CHANNEL_IDS],
     customChannels: [],
   };
@@ -170,14 +175,26 @@ function readLocalState() {
 function localStateSnapshot() {
   return {
     version: 1,
-    classifications: state.classifications,
+    classifications: normalizeClassifications(state.classifications),
     notes: state.notes,
     profile: state.profile,
     profileAnalysis: state.profileAnalysis,
     directParsedJobs: compactJobsForStorage(state.jobs.direct || []),
+    savedJobs: compactSavedJobsForStorage(state.savedJobs),
     enabledChannelIds: state.enabledChannelIds,
     customChannels: state.customChannels,
   };
+}
+
+function normalizeClassifications(classifications = {}) {
+  return Object.fromEntries(
+    Object.entries(classifications)
+      .map(([jobId, reactions]) => [
+        jobId,
+        [...new Set(Array.isArray(reactions) ? reactions : [])].filter((reaction) => validReactionKeys.has(reaction)),
+      ])
+      .filter(([, reactions]) => reactions.length)
+  );
 }
 
 function compactAnalysisForStorage(analysis = {}) {
@@ -202,6 +219,14 @@ function compactJobsForStorage(jobs = []) {
     }
     return compact;
   });
+}
+
+function compactSavedJobsForStorage(savedJobs = {}) {
+  return Object.fromEntries(
+    Object.entries(savedJobs)
+      .filter(([, job]) => job)
+      .map(([jobId, job]) => [jobId, compactJobsForStorage([job])[0]])
+  );
 }
 
 function saveLocalState() {
@@ -229,6 +254,43 @@ function localTimestamp() {
 
 function allLocalChannels() {
   return [...state.channelCatalog, ...state.customChannels];
+}
+
+function selectedClassifications(jobId) {
+  return (state.classifications[jobId] || []).filter((reaction) => validReactionKeys.has(reaction));
+}
+
+function savedJobIds() {
+  return Object.entries(state.classifications)
+    .filter(([, reactions]) => reactions.some((reaction) => validReactionKeys.has(reaction)))
+    .map(([jobId]) => jobId);
+}
+
+function knownJobMap() {
+  const jobs = new Map();
+  Object.values(state.savedJobs || {}).forEach((job) => {
+    if (job?.id != null) jobs.set(String(job.id), job);
+  });
+  Object.values(state.jobs).flat().forEach((job) => {
+    if (job?.id != null) jobs.set(String(job.id), job);
+  });
+  return jobs;
+}
+
+function rememberSavedJob(job) {
+  if (job?.id == null) return;
+  state.savedJobs[String(job.id)] = compactJobsForStorage([job])[0];
+}
+
+function reconcileSavedJobs() {
+  state.classifications = normalizeClassifications(state.classifications);
+  const classified = new Set(savedJobIds().map(String));
+  Object.keys(state.savedJobs || {}).forEach((jobId) => {
+    if (!classified.has(String(jobId))) delete state.savedJobs[jobId];
+  });
+  Object.values(state.jobs).flat().forEach((job) => {
+    if (job?.id != null && classified.has(String(job.id))) rememberSavedJob(job);
+  });
 }
 
 function rebuildChannels() {
@@ -339,13 +401,15 @@ async function boot() {
 
 async function loadState() {
   const data = readLocalState();
-  state.classifications = data.classifications || {};
+  state.classifications = normalizeClassifications(data.classifications || {});
   state.notes = data.notes || {};
   state.profile = { ...clone(DEFAULT_PROFILE), ...(data.profile || {}) };
   state.profileAnalysis = { ...clone(DEFAULT_PROFILE_ANALYSIS), ...(data.profileAnalysis || {}) };
   state.jobs.direct = data.directParsedJobs || [];
+  state.savedJobs = data.savedJobs || {};
   state.enabledChannelIds = data.enabledChannelIds || [...DEFAULT_ENABLED_CHANNEL_IDS];
   state.customChannels = (data.customChannels || []).map((channel) => normalizeLocalChannel(channel, "custom"));
+  reconcileSavedJobs();
 }
 
 async function loadChannels() {
@@ -365,15 +429,19 @@ async function loadJobs(channelId) {
     : `/api/jobs?channel=${encodeURIComponent(channelId)}`;
   const data = await api(path).catch(() => ({ jobs: [] }));
   state.jobs[channelId] = data.jobs || [];
+  reconcileSavedJobs();
+  saveLocalState();
 }
 
 function render() {
   renderSidebar();
   if (state.activeMode === "channel") renderChannel();
+  else if (state.activeMode === "later") renderLater();
   else renderDm();
 }
 
 function renderSidebar() {
+  const laterCount = savedJobIds().length;
   channelList.innerHTML = channels.map((channel) => {
     const count = state.jobs[channel.id]?.length || 0;
     return `
@@ -389,6 +457,26 @@ function renderSidebar() {
       <span class="row-label">채널 관리</span>
     </button>
   `;
+
+  const compactSection = document.querySelector(".sidebar-section.compact");
+  if (compactSection) {
+    compactSection.innerHTML = `
+      <button class="sidebar-row">
+        <span class="row-icon">▣</span>
+        <span class="row-label">Threads</span>
+        <span class="sidebar-count">3</span>
+      </button>
+      <button class="sidebar-row ${state.activeMode === "later" ? "active" : ""}" data-later-view>
+        <span class="row-icon">☆</span>
+        <span class="row-label">나중에 보기</span>
+        <span class="sidebar-count">${laterCount}</span>
+      </button>
+      <button class="sidebar-row">
+        <span class="row-icon">⌁</span>
+        <span class="row-label">Drafts & sent</span>
+      </button>
+    `;
+  }
 
   const jobDms = Object.values(state.jobs).flat().slice(0, 12).map((job) => ({
     id: `job:${job.id}`,
@@ -412,6 +500,20 @@ function renderSidebar() {
       <span class="row-label">${dm.name}</span>
     </button>
   `).join("");
+
+  renderRailState();
+}
+
+function renderRailState() {
+  document.querySelectorAll("[data-rail-home]").forEach((button) => {
+    button.classList.toggle("active", state.activeMode === "channel");
+  });
+  document.querySelectorAll("[data-rail-dms]").forEach((button) => {
+    button.classList.toggle("active", state.activeMode === "dm");
+  });
+  document.querySelectorAll("[data-later-view]").forEach((button) => {
+    button.classList.toggle("active", state.activeMode === "later");
+  });
 }
 
 function renderChannel() {
@@ -429,7 +531,6 @@ function renderChannel() {
       <div class="day-divider"><span>Parsed postings</span></div>
       ${jobs.length ? bottomAnchoredItems(jobs).map(renderJobMessage).join("") : emptyBlock("아직 파싱된 URL이 없습니다.")}
     `;
-    renderThread(jobs[0]);
     scrollToBottom(messageList);
     return;
   }
@@ -442,8 +543,60 @@ function renderChannel() {
     <div class="day-divider"><span>${channel.query} results</span></div>
     ${jobs.length ? bottomAnchoredItems(jobs).map(renderJobMessage).join("") : emptyBlock("공고를 불러오는 중입니다.")}
   `;
-  renderThread(state.selectedJob || jobs[0]);
   scrollToBottom(messageList);
+}
+
+function renderLater() {
+  const groups = laterGroups();
+  const total = savedJobIds().length;
+  channelTitle.textContent = "나중에 보기";
+  channelSubtitle.textContent = "이모지로 저장한 공고를 태그별로 모아봅니다.";
+  memberCount.textContent = total;
+  bookmarks.innerHTML = groups.map((group) => `
+    <button class="bookmark" data-later-filter="${group.reaction.key}">
+      ${group.reaction.emoji} ${group.jobs.length}
+    </button>
+  `).join("");
+  messageInput.placeholder = "저장한 공고의 스레드에서 메모를 남길 수 있습니다.";
+
+  messageList.innerHTML = `
+    <section class="channel-intro later-intro">
+      <div class="intro-icon">☆</div>
+      <h2>나중에 보기</h2>
+      <p>공고 메시지에 찍은 이모지가 저장 태그가 되어 이곳에 분류됩니다.</p>
+      <div class="intro-meta">
+        ${groups.map((group) => `<span>${group.reaction.emoji} ${escapeHtml(group.reaction.label)} ${group.jobs.length}</span>`).join("")}
+      </div>
+    </section>
+    ${total ? groups.map(renderLaterGroup).join("") : emptyBlock("저장된 공고가 없습니다. 채널에서 👀, ⭐, 💰 이모지를 눌러보세요.")}
+  `;
+  scrollToTop(messageList);
+}
+
+function laterGroups() {
+  const jobs = knownJobMap();
+  return reactionTypes.map((reaction) => ({
+    reaction,
+    jobs: Object.entries(state.classifications)
+      .filter(([, selected]) => selected.includes(reaction.key))
+      .map(([jobId]) => jobs.get(String(jobId)))
+      .filter(Boolean),
+  }));
+}
+
+function renderLaterGroup(group) {
+  return `
+    <section class="later-group" id="later-${group.reaction.key}">
+      <div class="later-group-header">
+        <span>${group.reaction.emoji}</span>
+        <div>
+          <h3>${escapeHtml(group.reaction.label)}</h3>
+          <p>${group.jobs.length}개 공고</p>
+        </div>
+      </div>
+      ${group.jobs.length ? group.jobs.map(renderJobMessage).join("") : emptyBlock(`${group.reaction.emoji} 태그가 찍힌 공고가 없습니다.`)}
+    </section>
+  `;
 }
 
 function channelIntro(channel, text) {
@@ -489,40 +642,43 @@ function scrollToBottom(element) {
 }
 
 function renderJobMessage(job) {
-  const selected = state.classifications[job.id] || [];
+  const jobId = String(job.id);
+  const selected = selectedClassifications(jobId);
+  const isThreadSelected = threadPanel.classList.contains("open") && String(state.selectedJob?.id) === jobId;
   const company = jobCompany(job);
   return `
-    <article class="message job-message" data-job="${job.id}">
-      <button class="message-avatar" style="background:${colorFor(company)}" data-open-dm="${job.id}">${initials(company)}</button>
+    <article class="message job-message ${isThreadSelected ? "thread-selected" : ""}" data-job="${escapeHtml(jobId)}" tabindex="0" aria-label="${escapeHtml(jobCompany(job))} 공고 스레드 열기">
+      <button class="message-avatar" style="background:${colorFor(company)}" data-open-dm="${escapeHtml(jobId)}">${initials(company)}</button>
       <div class="message-content">
         <div class="message-meta">
-          <button class="message-name" data-open-dm="${job.id}">${escapeHtml(company)}</button>
+          <button class="message-name" data-open-dm="${escapeHtml(jobId)}">${escapeHtml(company)}</button>
           <span class="message-time">${escapeHtml(jobSource(job))}</span>
         </div>
         <div class="message-text">${escapeHtml(jobMessageText(job))}</div>
         ${renderJobCard(job)}
         <div class="reactions">
           ${reactionTypes.map((reaction) => `
-            <button class="reaction ${selected.includes(reaction.key) ? "selected" : ""}" data-classify="${job.id}" data-reaction="${reaction.key}">
+            <button class="reaction ${selected.includes(reaction.key) ? "selected" : ""}" data-classify="${escapeHtml(jobId)}" data-reaction="${reaction.key}" title="${reaction.label}">
               <span>${reaction.emoji}</span><span>${reaction.label}</span>
             </button>
           `).join("")}
         </div>
-        <button class="reply-summary" data-thread-job="${job.id}">
+        <button class="reply-summary" data-thread-job="${escapeHtml(jobId)}">
           <span>${(state.notes[job.id] || []).length} notes</span>
           <strong>View thread + local match</strong>
         </button>
       </div>
       <div class="message-actions">
-        <button title="DM" data-open-dm="${job.id}">💬</button>
-        <button title="Thread" data-thread-job="${job.id}">↪</button>
-        <button title="Open" data-open-url="${jobUrl(job)}">↗</button>
+        <button title="DM" data-open-dm="${escapeHtml(jobId)}">💬</button>
+        <button title="Thread" data-thread-job="${escapeHtml(jobId)}">↪</button>
+        <button title="Open" data-open-url="${escapeHtml(jobUrl(job))}">↗</button>
       </div>
     </article>
   `;
 }
 
 function renderJobCard(job) {
+  const url = jobUrl(job);
   return `
     <div class="job-json-card">
       <div class="json-card-head">
@@ -534,8 +690,8 @@ function renderJobCard(job) {
       </div>
       <pre>${escapeHtml(JSON.stringify(job, null, 2))}</pre>
       <div class="job-card-footer">
-        <span>${escapeHtml(jobUrl(job))}</span>
-        <a href="${jobUrl(job)}" target="_blank" rel="noreferrer">원문 열기</a>
+        <span>${escapeHtml(url)}</span>
+        <a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">원문 열기</a>
       </div>
     </div>
   `;
@@ -747,18 +903,49 @@ function renderJobDm(job) {
       </article>
     `).join("") : emptyBlock("아직 기록이 없습니다. composer에 자소서 초안/인재상/메모를 남겨보세요.")}
   `;
-  renderThread(job);
+}
+
+function openThreadPanel() {
+  appShell.classList.add("thread-open");
+  threadPanel.classList.add("open");
+  threadPanel.setAttribute("aria-hidden", "false");
+}
+
+function resetThreadPanel() {
+  threadChannel.textContent = "# thread";
+  threadBody.innerHTML = emptyBlock("공고를 선택하면 로컬 매칭 결과가 표시됩니다.");
+}
+
+function closeThreadPanel({ clearSelection = true } = {}) {
+  threadRenderToken += 1;
+  appShell.classList.remove("thread-open");
+  threadPanel.classList.remove("open");
+  threadPanel.setAttribute("aria-hidden", "true");
+  if (clearSelection) state.selectedJob = null;
+  resetThreadPanel();
+  renderRailState();
+}
+
+async function openJobThread(job) {
+  if (!job) return;
+  openThreadPanel();
+  await renderThread(job);
 }
 
 async function renderThread(job) {
   if (!job) {
-    threadChannel.textContent = "# empty";
-    threadBody.innerHTML = emptyBlock("공고를 선택하면 로컬 매칭 결과가 표시됩니다.");
+    resetThreadPanel();
     scrollToBottom(threadBody);
     return;
   }
+  const renderToken = ++threadRenderToken;
   state.selectedJob = job;
-  threadChannel.textContent = `# ${state.activeMode === "channel" ? currentChannel().name : "DM"}`;
+  const threadScope = state.activeMode === "channel"
+    ? currentChannel().name
+    : state.activeMode === "later"
+      ? "나중에 보기"
+      : "DM";
+  threadChannel.textContent = `# ${threadScope}`;
   threadBody.innerHTML = `
     <div class="thread-context"><span>local matching</span><strong>계산 중</strong></div>
     ${renderJobMessage(job)}
@@ -774,7 +961,8 @@ async function renderThread(job) {
   `;
   scrollToBottom(threadBody);
   const match = await api("/api/match", { method: "POST", body: JSON.stringify({ job, profile: state.profile }) }).catch((err) => ({ match: { score: 0, summary: err.message, strengths: [], risks: [], nextActions: [] } }));
-  const result = document.querySelector("#matchResult");
+  if (renderToken !== threadRenderToken || String(state.selectedJob?.id) !== String(job.id)) return;
+  const result = threadBody.querySelector("#matchResult");
   if (result) {
     result.innerHTML = renderMatch(match.match);
     scrollToBottom(threadBody);
@@ -901,7 +1089,7 @@ function renderMatch(match) {
 }
 
 function findJob(jobId) {
-  return Object.values(state.jobs).flat().find((job) => String(job.id) === String(jobId));
+  return knownJobMap().get(String(jobId));
 }
 
 async function submitComposer(text) {
@@ -915,7 +1103,6 @@ async function submitComposer(text) {
       saveLocalState();
     }
     render();
-    renderThread(data.job);
     return;
   }
 
@@ -1084,6 +1271,30 @@ function renderChannelManager() {
 }
 
 document.addEventListener("click", async (event) => {
+  if (event.target.closest("[data-rail-home]")) {
+    state.activeMode = "channel";
+    state.activeDm = null;
+    closeThreadPanel();
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-rail-dms]")) {
+    state.activeMode = "dm";
+    state.activeDm = state.activeDm || "search";
+    closeThreadPanel();
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-later-view]")) {
+    state.activeMode = "later";
+    state.activeDm = null;
+    closeThreadPanel();
+    render();
+    return;
+  }
+
   if (event.target.closest("#openChannelManager")) {
     openChannelBrowser();
     return;
@@ -1120,14 +1331,18 @@ document.addEventListener("click", async (event) => {
     state.activeMode = "channel";
     state.activeChannel = channelButton.dataset.channel;
     state.activeDm = null;
+    closeThreadPanel();
     render();
+    return;
   }
 
   const dmButton = event.target.closest("[data-dm]");
   if (dmButton) {
     state.activeMode = "dm";
     state.activeDm = dmButton.dataset.dm;
+    closeThreadPanel();
     render();
+    return;
   }
 
   const refresh = event.target.closest("[data-refresh]");
@@ -1136,29 +1351,64 @@ document.addEventListener("click", async (event) => {
     render();
   }
 
+  const laterFilter = event.target.closest("[data-later-filter]");
+  if (laterFilter) {
+    const target = document.querySelector(`#later-${laterFilter.dataset.laterFilter}`);
+    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
   const classify = event.target.closest("[data-classify]");
   if (classify) {
     const jobId = classify.dataset.classify;
     const reaction = classify.dataset.reaction;
+    if (!validReactionKeys.has(reaction)) return;
     const current = new Set(state.classifications[jobId] || []);
     current.has(reaction) ? current.delete(reaction) : current.add(reaction);
-    state.classifications[jobId] = [...current];
+    if (current.size) {
+      state.classifications[jobId] = [...current].filter((item) => validReactionKeys.has(item));
+      const job = findJob(jobId);
+      if (job) rememberSavedJob(job);
+    } else {
+      delete state.classifications[jobId];
+      delete state.savedJobs[jobId];
+    }
+    reconcileSavedJobs();
     saveLocalState();
     render();
+    if (threadPanel.classList.contains("open") && String(state.selectedJob?.id) === String(jobId)) {
+      await renderThread(findJob(jobId) || state.selectedJob);
+    }
+    return;
   }
 
   const threadJob = event.target.closest("[data-thread-job]");
-  if (threadJob) renderThread(findJob(threadJob.dataset.threadJob));
+  if (threadJob) {
+    searchOverlay.classList.remove("open");
+    await openJobThread(findJob(threadJob.dataset.threadJob));
+    return;
+  }
 
   const openDm = event.target.closest("[data-open-dm]");
   if (openDm) {
     state.activeMode = "dm";
     state.activeDm = `job:${openDm.dataset.openDm}`;
+    closeThreadPanel();
     render();
+    return;
   }
 
   const openUrl = event.target.closest("[data-open-url]");
-  if (openUrl) window.open(openUrl.dataset.openUrl, "_blank", "noopener");
+  if (openUrl) {
+    window.open(openUrl.dataset.openUrl, "_blank", "noopener");
+    return;
+  }
+
+  const jobMessage = event.target.closest("[data-job]");
+  if (jobMessage && !event.target.closest("button, a, input, textarea, select")) {
+    await openJobThread(findJob(jobMessage.dataset.job));
+    return;
+  }
 
   if (event.target.id === "saveProfile") {
     const profile = {
@@ -1240,6 +1490,14 @@ messageInput.addEventListener("keydown", (event) => {
   composer.requestSubmit();
 });
 
+document.addEventListener("keydown", async (event) => {
+  if (!["Enter", " "].includes(event.key)) return;
+  const jobMessage = event.target.closest?.("[data-job]");
+  if (!jobMessage || event.target.closest("button, a, input, textarea, select")) return;
+  event.preventDefault();
+  await openJobThread(findJob(jobMessage.dataset.job));
+});
+
 threadReply.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = threadInput.value.trim();
@@ -1250,7 +1508,7 @@ threadReply.addEventListener("submit", async (event) => {
   renderThread(state.selectedJob);
 });
 
-closeThread.addEventListener("click", () => threadPanel.classList.remove("open"));
+closeThread.addEventListener("click", () => closeThreadPanel());
 searchTrigger.addEventListener("click", () => {
   searchOverlay.classList.add("open");
   searchInput.focus();

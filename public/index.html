@@ -29,11 +29,11 @@
       <aside class="rail">
         <button class="workspace-switch active" aria-label="JobKorea Vibe">J</button>
         <button class="workspace-switch" aria-label="Hackathon">H</button>
-        <button class="rail-item active" aria-label="Home">
+        <button class="rail-item active" aria-label="Home" data-rail-home>
           <span class="rail-icon">⌂</span>
           <span>Home</span>
         </button>
-        <button class="rail-item" aria-label="DMs">
+        <button class="rail-item" aria-label="DMs" data-rail-dms>
           <span class="rail-icon">☰</span>
           <span>DMs</span>
         </button>
@@ -41,7 +41,7 @@
           <span class="rail-icon">◷</span>
           <span>Activity</span>
         </button>
-        <button class="rail-item" aria-label="Later">
+        <button class="rail-item" aria-label="Later" data-later-view>
           <span class="rail-icon">☆</span>
           <span>Later</span>
         </button>
@@ -141,7 +141,7 @@
         </form>
       </main>
 
-      <aside class="thread-panel" id="threadPanel">
+      <aside class="thread-panel" id="threadPanel" aria-hidden="true">
         <div class="thread-header">
           <div>
             <h2>Thread</h2>
