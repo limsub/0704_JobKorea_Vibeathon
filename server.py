@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+import concurrent.futures
 import datetime
+import hashlib
 import html
 import io
 import json
@@ -475,7 +477,9 @@ SLACK_JOB_MESSAGE_PROMPT = """
 - message_body는 Slack 본문에 바로 붙일 수 있게 3~5문단의 자연스러운 한국어로 쓴다.
 - thread_comment는 스레드 첫 코멘트로, 짧은 해석 문단 + 핵심 항목 bullet + 확인 필요 사항 + 한 줄 결론 순서로 쓴다.
 - 사용자가 준 예시처럼 너무 딱딱한 공고 요약이 아니라 동료에게 레퍼런스를 공유하는 톤으로 쓴다.
-- 이모지는 필요할 때 텍스트 이모지(:eyes:) 정도만 적게 사용한다.
+- 공고마다 문장 시작, 길이, 이모지, 말투를 다르게 쓴다. 같은 템플릿을 반복하지 않는다.
+- "채용공고 안내"처럼 공고문 말투를 피하고, 실제 Slack에서 동료에게 공유하는 메모처럼 쓴다.
+- 이모지는 :eyes:, :memo:, :bulb:, :mag:, :sparkles: 중 상황에 맞게 0~2개만 쓴다.
 - key_points는 역할 성격, 주요 키워드, 산업군, 경험 기준, 확인 기한, 급여/위치 중 중요한 것만 4~7개로 쓴다.
 - 각 결과의 id는 입력 job id와 정확히 같아야 한다.
 """.strip()
@@ -1402,6 +1406,14 @@ def env_int(name, default):
         return default
 
 
+def clamp_int(value, default, minimum=1, maximum=20):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    return max(minimum, min(maximum, number))
+
+
 def openai_job_message_limit():
     default = 0 if os.environ.get("VERCEL") else 10
     return max(0, env_int("OPENAI_JOB_MESSAGE_LIMIT", default))
@@ -1477,25 +1489,59 @@ def local_slack_message(job, error=""):
     location = clean_text(raw.get("location")) or "위치 확인 필요"
     salary = clean_text(raw.get("salary")) or "급여 확인 필요"
     period = clean_text(raw.get("period")) or clean_text(profile.get("deadline")) or "마감일 확인 필요"
+    seed = f"{company}|{title}|{period}|{keyword_text}"
+    emoji = stable_pick(seed, [":eyes:", ":memo:", ":bulb:", ":mag:", ":sparkles:", ""])
+    opener = stable_pick(seed + "opener", [
+        f"{company} 쪽에서 눈에 들어온 역할 하나 공유해요{(' ' + emoji) if emoji else ''}",
+        f"요 건은 {company} / {title} 흐름이라 한번 봐도 좋겠어요{(' ' + emoji) if emoji else ''}",
+        f"{company}에서 나온 역할인데, 팀에서 참고할 만한 포인트가 보여요.",
+        f"가볍게 체크해볼 만한 {company} 건 하나 가져왔어요{(' ' + emoji) if emoji else ''}",
+    ])
+    angle = stable_pick(seed + "angle", [
+        f"{keyword_text} 쪽 키워드가 같이 묶여 있어서, 역할 범위가 꽤 선명한 편이에요.",
+        f"핵심은 {keyword_text} 쪽으로 보이고, 실제 업무 맥락은 원문에서 한 번 더 보면 좋겠습니다.",
+        f"표면상으로는 {title}이지만, 키워드를 보면 {keyword_text} 경험을 엮어볼 여지가 있어요.",
+        f"{career} 기준이라 바로 실무에 들어갈 수 있는 분들 중심으로 보는 건 같아요.",
+    ])
+    close = stable_pick(seed + "close", [
+        "세부 내용은 스레드에 짧게 정리해둘게요.",
+        "궁금한 분들은 스레드에 적어둔 체크포인트부터 보면 됩니다.",
+        "일단 놓치지 않게 공유하고, 디테일은 스레드로 넘겨둘게요.",
+        "지원 여부 판단할 때 볼 부분만 스레드에 추려놨어요.",
+    ])
     message_body = "\n\n".join([
-        f"{company} 관련 채용공고 하나 공유해요.",
-        f"{keyword_text} 키워드가 같이 보이는 건이라,\n관련 직무 보시는 분들은 참고할 만해 보여요.",
-        f"경력 기준은 {career}이고, 확인 기한은 {period}로 잡혀 있습니다.",
-        "세부 내용은 스레드에 정리해둘게요 :eyes:",
+        opener,
+        angle,
+        f"위치는 {location}, 일정은 {period} 기준으로 보입니다.",
+        close,
+    ])
+    thread_intro = stable_pick(seed + "thread", [
+        f"{company}의 {title} 역할로 보여요.",
+        f"이 건은 {title} 중심으로 보면 될 것 같아요.",
+        f"원문 기준으로 보면 {company}에서 {title} 쪽을 찾는 흐름입니다.",
+        f"{company} 건은 아래 포인트만 먼저 보면 판단이 빠를 듯해요.",
     ])
     thread_comment = "\n\n".join([
-        f"{company}의 {title} 공고로 보여요.",
-        "세부 내용 가볍게 정리해봤어요.",
-        "\n".join([
-            f"- 관련 조직/회사: {company}",
-            f"- 역할 성격: {title}",
-            f"- 주요 키워드: {keyword_text}",
-            f"- 경험 기준: {career}",
-            f"- 위치: {location}",
-            f"- 확인 기한: {period}",
-            f"- 급여: {salary}",
+        thread_intro,
+        stable_pick(seed + "note", [
+            "세부 내용 가볍게 정리해봤어요.",
+            "볼 만한 부분만 추려두면 이렇습니다.",
+            "지원 검토할 때 볼 체크포인트는 아래 정도예요.",
         ]),
-        "원문에서 일부 조건이 축약되어 보일 수 있으니 상세 페이지 확인이 필요해요.",
+        "\n".join([
+            f"• 관련 조직/회사: {company}",
+            f"• 역할 성격: {title}",
+            f"• 주요 키워드: {keyword_text}",
+            f"• 경험 기준: {career}",
+            f"• 위치: {location}",
+            f"• 확인 기한: {period}",
+            f"• 급여: {salary}",
+        ]),
+        stable_pick(seed + "tail", [
+            "전체적으로는 원문 확인 후 역할 범위와 기대 성과를 같이 보면 좋겠습니다.",
+            "조건이 축약돼 보이는 부분이 있어서, 원문에서 팀/근무지/처우는 한 번 더 확인해 주세요.",
+            "키워드는 괜찮아 보이지만 실제 핏은 상세 업무 범위를 보고 판단하는 게 좋겠습니다.",
+        ]),
     ])
     key_points = [
         f"회사: {company}",
@@ -1506,7 +1552,12 @@ def local_slack_message(job, error=""):
         f"기한: {period}",
     ]
     return {
-        "message_title": f"{company} {title} 공유해요",
+        "message_title": stable_pick(seed + "title", [
+            f"{company} 쪽 참고할 만한 흐름",
+            f"{company} 건, 키워드가 괜찮아요",
+            f"{keyword_text.split(',')[0]} 쪽 메모",
+            f"{company} 레퍼런스 하나 공유",
+        ]),
         "message_body": message_body,
         "thread_comment": thread_comment,
         "thread_summary": f"{company} / {title} / {career}",
@@ -1525,6 +1576,34 @@ def apply_slack_message(job, message):
     merged.update(message)
     job["slack_messages"] = merged
     return job
+
+
+def stable_index(seed, length):
+    if length <= 0:
+        return 0
+    digest = hashlib.sha256(clean_text(seed).encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) % length
+
+
+def stable_pick(seed, values):
+    return values[stable_index(seed, len(values))]
+
+
+def hydrate_one_openai_slack_message(key, job):
+    result, model = call_openai_structured(
+        SLACK_JOB_MESSAGE_PROMPT,
+        {
+            "jobs": [compact_job_for_ai(job)],
+            "output_use": "Slack channel message and first thread comment for this job",
+        },
+        "job_slack_messages",
+        SLACK_JOB_MESSAGE_SCHEMA,
+        max_output_tokens=1800,
+        timeout=openai_job_message_timeout(),
+    )
+    messages = result.get("jobs", [])
+    message = messages[0] if messages and isinstance(messages[0], dict) else {}
+    return key, normalize_slack_message(job, message, ai_mode="openai", model=model)
 
 
 def hydrate_slack_messages(jobs):
@@ -1554,30 +1633,18 @@ def hydrate_slack_messages(jobs):
 
     selected = pending[:limit]
     overflow = pending[limit:]
-    try:
-        result, model = call_openai_structured(
-            SLACK_JOB_MESSAGE_PROMPT,
-            {
-                "jobs": [compact_job_for_ai(job) for _, job in selected],
-                "output_use": "Slack channel message and first thread comment for each job",
-            },
-            "job_slack_messages",
-            SLACK_JOB_MESSAGE_SCHEMA,
-            max_output_tokens=6000,
-            timeout=openai_job_message_timeout(),
-        )
-        by_id = {
-            str(item.get("id", "")): item
-            for item in result.get("jobs", [])
-            if isinstance(item, dict)
+    max_workers = max(1, min(env_int("OPENAI_JOB_MESSAGE_WORKERS", 4), len(selected)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {
+            executor.submit(hydrate_one_openai_slack_message, key, job): (key, job)
+            for key, job in selected
         }
-        for key, job in selected:
-            message = normalize_slack_message(job, by_id.get(str(job.get("id"))), ai_mode="openai", model=model)
-            JOB_MESSAGE_CACHE[key] = message
-            apply_slack_message(job, message)
-    except Exception as exc:
-        for key, job in selected:
-            message = normalize_slack_message(job, {}, ai_mode="local_fallback", error=str(exc))
+        for future in concurrent.futures.as_completed(future_map):
+            key, job = future_map[future]
+            try:
+                _, message = future.result()
+            except Exception as exc:
+                message = normalize_slack_message(job, {}, ai_mode="local_fallback", error=str(exc))
             JOB_MESSAGE_CACHE[key] = message
             apply_slack_message(job, message)
 
@@ -1797,12 +1864,28 @@ def local_match_comment(name, score, strengths, risks, next_actions, recommendat
     good = strengths[0] if strengths else "프로필과 맞는 키워드"
     risk = risks[0] if risks else "원문 조건 확인"
     actions = next_actions[:3] or ["공고 원문 확인", "경험 근거 보강", "지원 방향 정리"]
-    return "\n\n".join([
+    seed = f"{name}|{score}|{good}|{risk}|{recommendation}"
+    opener = stable_pick(seed + "match-opener", [
         f"@{name} 님, 이 건은 {score}점 정도예요.",
+        f"@{name} 님 기준으로 보면 대략 {score}점 근처로 보여요.",
+        f"@{name} 님, 요 건은 {score}점 정도로 보고 있습니다.",
+    ])
+    body = stable_pick(seed + "match-body", [
         f"보니까 {good} 쪽은 괜찮아요.\n근데 {risk} 부분은 한 번 더 확인하면 좋겠습니다.",
+        f"{good} 포인트는 꽤 연결됩니다.\n반대로 {risk} 쪽은 메시지를 조금 더 보강하면 좋아요.",
+        f"현재 자료 기준으로는 {good}이 장점이고,\n{risk}은 지원 전에 체크할 부분으로 보여요.",
+    ])
+    close = stable_pick(seed + "match-close", [
+        "요렇게 진행해봅시다 !",
+        "이 방향이면 자소서/포폴 문장도 꽤 잡기 쉬울 것 같아요.",
+        "먼저 이 세 가지만 보완해보면 좋겠습니다.",
+    ])
+    return "\n\n".join([
+        opener,
+        body,
         f"추천 방향은 \"{recommendation}\"으로 잡아보면 좋아 보여요.",
         "보완하면 좋은 것\n\n" + "\n".join(f"{idx}. {item}" for idx, item in enumerate(actions, 1)),
-        "요렇게 진행해봅시다 !",
+        close,
     ])
 
 
@@ -2072,16 +2155,18 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json(channel_payload(default_state()))
             if parsed.path == "/api/jobs":
                 channel = params.get("channel", ["pm"])[0]
+                limit = clamp_int(params.get("limit", [10])[0], 10, 1, 20)
                 channel_info = find_channel(channel, default_state()) or normalize_channel({"id": channel, "name": channel, "query": channel})
                 query = channel_info.get("query") or channel
                 try:
-                    jobs = search_jobkorea(query)
+                    jobs = search_jobkorea(query, limit=limit)
                 except Exception:
-                    jobs = fallback_jobs_for(channel_info)
+                    jobs = fallback_jobs_for(channel_info)[:limit]
                 return self.json({"jobs": jobs, "query": query, "channel": channel_info})
             if parsed.path == "/api/search":
                 query = params.get("q", [""])[0].strip()
-                jobs = search_jobkorea(query or "개발자") if query else []
+                limit = clamp_int(params.get("limit", [10])[0], 10, 1, 20)
+                jobs = search_jobkorea(query or "개발자", limit=limit) if query else []
                 return self.json({"jobs": jobs, "query": query})
             if parsed.path == "/api/parse":
                 url = params.get("url", [""])[0]

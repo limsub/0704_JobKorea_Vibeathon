@@ -96,6 +96,7 @@ OPENAI_API_KEY=... ./scripts/start_server.sh
 | `CHATGPT_API_KEY` | 없음 | `OPENAI_API_KEY`가 없을 때 사용하는 대체 키 |
 | `OPENAI_MODEL` | `gpt-4o-mini` | PDF 프로필 JSON 변환, 공고 Slack 메시지 변환, 매칭 코멘트 생성 모델 |
 | `OPENAI_JOB_MESSAGE_LIMIT` | local `10`, Vercel `0` | 공고 리스트 응답 1회에서 OpenAI로 변환할 최대 공고 수. Vercel 기본값은 초기 피드 속도를 위해 로컬 Slack형 fallback을 사용 |
+| `OPENAI_JOB_MESSAGE_WORKERS` | `4` | 공고 Slack 메시지를 OpenAI로 변환할 때 병렬 처리할 작업 수 |
 | `OPENAI_JOB_MESSAGE_TIMEOUT` | `8` | 공고 Slack 메시지 변환 OpenAI 호출 제한 시간. 초과 시 로컬 fallback |
 | `OCR_MAX_PAGES` | `20` | OCR 대상 최대 페이지 수 |
 | `OCR_DPI` | `160` | PDF를 이미지로 변환할 때 DPI |

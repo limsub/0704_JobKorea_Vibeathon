@@ -411,6 +411,15 @@ button {
   font-weight: 900;
 }
 
+.dm-avatar img,
+.search-avatar img,
+.later-list-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .status-dot {
   width: 8px;
   height: 8px;
@@ -670,6 +679,19 @@ button {
   font-weight: 900;
 }
 
+.avatar-photo {
+  overflow: hidden;
+  padding: 0;
+  background: #eef2f6;
+}
+
+.avatar-photo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .message-content {
   min-width: 0;
 }
@@ -758,6 +780,103 @@ button {
 
 .message-actions button:last-child {
   border-right: 0;
+}
+
+.skeleton-message {
+  pointer-events: none;
+}
+
+.skeleton-avatar,
+.skeleton-line,
+.skeleton-card,
+.skeleton-grid span,
+.skeleton-tags span,
+.profile-mini-skeleton span {
+  position: relative;
+  overflow: hidden;
+  background: #ececec;
+}
+
+.skeleton-avatar::after,
+.skeleton-line::after,
+.skeleton-card::after,
+.skeleton-grid span::after,
+.skeleton-tags span::after,
+.profile-mini-skeleton span::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent);
+  transform: translateX(-100%);
+  animation: skeleton-shimmer 1.35s infinite;
+}
+
+@keyframes skeleton-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+}
+
+.skeleton-line {
+  height: 12px;
+  margin: 5px 0;
+  border-radius: 999px;
+}
+
+.skeleton-line.short {
+  width: 150px;
+}
+
+.skeleton-line.long {
+  width: min(620px, 82%);
+}
+
+.skeleton-line.title {
+  width: min(360px, 72%);
+  height: 18px;
+  margin: 0 0 14px;
+}
+
+.skeleton-card {
+  max-width: 720px;
+  margin-top: 10px;
+  padding: 14px;
+  border: 1px solid #e1e1e1;
+  border-radius: 8px;
+  background: #f7f7f7;
+}
+
+.skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.skeleton-grid span {
+  height: 34px;
+  border-radius: 6px;
+}
+
+.skeleton-tags {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.skeleton-tags span {
+  width: 86px;
+  height: 24px;
+  border-radius: 999px;
+}
+
+.compact-skeleton .skeleton-card {
+  display: none;
 }
 
 .reactions {
@@ -913,6 +1032,11 @@ button {
   border-radius: 12px;
   color: #fff;
   font-weight: 900;
+}
+
+.later-list-avatar.avatar-photo {
+  overflow: hidden;
+  padding: 0;
 }
 
 .later-list-main {
@@ -1138,6 +1262,21 @@ button {
   background: var(--surface-soft);
 }
 
+.job-toolbar div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.job-toolbar strong {
+  font-size: 13px;
+}
+
+.job-toolbar span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .job-toolbar button,
 .profile-editor button {
   height: 32px;
@@ -1146,6 +1285,49 @@ button {
   color: #fff;
   background: var(--green);
   font-weight: 900;
+}
+
+.job-toolbar button[disabled] {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.feed-progress {
+  display: grid;
+  gap: 7px;
+  margin: 0 18px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.feed-progress div {
+  position: relative;
+  overflow: hidden;
+  height: 4px;
+  border-radius: 999px;
+  background: #e8e8e8;
+}
+
+.feed-progress i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 42%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--green), var(--blue));
+  animation: progress-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes progress-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(80%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
 }
 
 .profile-intro .intro-icon {
@@ -1276,37 +1458,24 @@ button {
   padding-left: 18px;
 }
 
-.text-output-card,
-.json-output-card {
-  max-width: 920px;
+.profile-mini-skeleton {
+  display: grid;
+  gap: 8px;
+  max-width: 520px;
   margin-top: 10px;
-  overflow: hidden;
-  border: 1px solid #d9d9d9;
-  border-radius: 8px;
-  background: #fff;
 }
 
-.text-output-card {
-  border-color: #f0c4d1;
+.profile-mini-skeleton span {
+  height: 12px;
+  border-radius: 999px;
 }
 
-.text-output-card pre,
-.json-output-card pre {
-  max-height: 460px;
-  margin: 0;
-  overflow: auto;
-  padding: 14px;
-  color: #202124;
-  background: #f7f7f7;
-  font-size: 12px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  word-break: break-word;
+.profile-mini-skeleton span:nth-child(2) {
+  width: 78%;
 }
 
-.text-output-card pre {
-  color: #1d1c1d;
-  background: #fff8fa;
+.profile-mini-skeleton span:nth-child(3) {
+  width: 56%;
 }
 
 .profile-thread-summary {
@@ -1363,16 +1532,6 @@ button {
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
 }
 
-.job-json-card {
-  max-width: min(920px, 100%);
-  margin-top: 10px;
-  overflow: hidden;
-  border: 1px solid #d9d9d9;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
-}
-
 .job-card-head {
   display: flex;
   align-items: flex-start;
@@ -1398,19 +1557,6 @@ button {
   color: var(--text);
   font-size: 16px;
   line-height: 1.32;
-}
-
-.job-json-card pre {
-  max-height: 460px;
-  margin: 0;
-  overflow: auto;
-  padding: 14px;
-  border-top: 1px solid #ededed;
-  color: #242124;
-  background: #fbfbfb;
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre;
 }
 
 .job-source {
@@ -1585,6 +1731,18 @@ button {
   white-space: pre-wrap;
 }
 
+.match-message .match-comment {
+  max-width: 760px;
+  margin: 0;
+  border-color: #d9e8df;
+  background: #f7fbf8;
+}
+
+.match-avatar {
+  background: linear-gradient(135deg, var(--green), var(--blue));
+  font-size: 12px;
+}
+
 .ai-match ul {
   margin: 5px 0 10px;
   padding-left: 18px;
@@ -1597,65 +1755,6 @@ button {
 .ai-match small {
   color: var(--muted);
   font-weight: 800;
-}
-
-.ai-trace {
-  max-width: 760px;
-  margin-top: 10px;
-  padding: 12px;
-  border: 1px solid #d7e4ef;
-  border-radius: 8px;
-  background: #f8fbfd;
-}
-
-.trace-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 1px;
-  overflow: hidden;
-  border: 1px solid #e6eef4;
-  border-radius: 7px;
-  background: #e6eef4;
-}
-
-.trace-grid span {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-  padding: 8px;
-  background: #fff;
-  font-size: 12px;
-}
-
-.trace-grid strong {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.ai-trace a {
-  display: block;
-  overflow: hidden;
-  margin-top: 10px;
-  color: var(--blue);
-  font-size: 12px;
-  font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ai-trace ol {
-  margin: 10px 0 0;
-  padding-left: 20px;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-.ai-trace p {
-  margin: 10px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.45;
 }
 
 .compact-message {
@@ -2162,6 +2261,11 @@ button {
   font-weight: 900;
 }
 
+.search-avatar.avatar-photo {
+  overflow: hidden;
+  padding: 0;
+}
+
 @media (max-width: 1180px) {
   .app-shell {
     grid-template-columns: 64px 260px minmax(0, 1fr);
@@ -2284,10 +2388,6 @@ button {
   .job-card-footer {
     align-items: flex-start;
     flex-direction: column;
-  }
-
-  .trace-grid {
-    grid-template-columns: 1fr;
   }
 
   .later-category-grid {
