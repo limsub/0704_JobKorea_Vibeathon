@@ -45,6 +45,7 @@ const state = {
   activeMode: "channel",
   activeChannel: "pm",
   activeDm: null,
+  activeLaterReaction: "watch",
   jobs: { direct: [] },
   savedJobs: {},
   channelCatalog: [],
@@ -441,7 +442,6 @@ function render() {
 }
 
 function renderSidebar() {
-  const laterCount = savedJobIds().length;
   channelList.innerHTML = channels.map((channel) => {
     const count = state.jobs[channel.id]?.length || 0;
     return `
@@ -466,10 +466,10 @@ function renderSidebar() {
         <span class="row-label">Threads</span>
         <span class="sidebar-count">3</span>
       </button>
-      <button class="sidebar-row ${state.activeMode === "later" ? "active" : ""}" data-later-view>
-        <span class="row-icon">☆</span>
-        <span class="row-label">나중에 보기</span>
-        <span class="sidebar-count">${laterCount}</span>
+      <button class="sidebar-row">
+        <span class="row-icon">@</span>
+        <span class="row-label">Mentions & reactions</span>
+        <span class="sidebar-count urgent">2</span>
       </button>
       <button class="sidebar-row">
         <span class="row-icon">⌁</span>
@@ -549,12 +549,14 @@ function renderChannel() {
 function renderLater() {
   const groups = laterGroups();
   const total = savedJobIds().length;
+  const activeGroup = groups.find((group) => group.reaction.key === state.activeLaterReaction) || groups[0];
+  state.activeLaterReaction = activeGroup.reaction.key;
   channelTitle.textContent = "나중에 보기";
   channelSubtitle.textContent = "이모지로 저장한 공고를 태그별로 모아봅니다.";
   memberCount.textContent = total;
   bookmarks.innerHTML = groups.map((group) => `
-    <button class="bookmark" data-later-filter="${group.reaction.key}">
-      ${group.reaction.emoji} ${group.jobs.length}
+    <button class="bookmark ${group.reaction.key === activeGroup.reaction.key ? "active" : ""}" data-later-reaction="${group.reaction.key}">
+      ${group.reaction.emoji} ${escapeHtml(group.reaction.label)} ${group.jobs.length}
     </button>
   `).join("");
   messageInput.placeholder = "저장한 공고의 스레드에서 메모를 남길 수 있습니다.";
@@ -564,11 +566,11 @@ function renderLater() {
       <div class="intro-icon">☆</div>
       <h2>나중에 보기</h2>
       <p>공고 메시지에 찍은 이모지가 저장 태그가 되어 이곳에 분류됩니다.</p>
-      <div class="intro-meta">
-        ${groups.map((group) => `<span>${group.reaction.emoji} ${escapeHtml(group.reaction.label)} ${group.jobs.length}</span>`).join("")}
+      <div class="later-category-grid">
+        ${groups.map((group) => renderLaterCategoryButton(group, activeGroup.reaction.key)).join("")}
       </div>
     </section>
-    ${total ? groups.map(renderLaterGroup).join("") : emptyBlock("저장된 공고가 없습니다. 채널에서 👀, ⭐, 💰 이모지를 눌러보세요.")}
+    ${renderLaterGroup(activeGroup)}
   `;
   scrollToTop(messageList);
 }
@@ -596,6 +598,16 @@ function renderLaterGroup(group) {
       </div>
       ${group.jobs.length ? group.jobs.map(renderJobMessage).join("") : emptyBlock(`${group.reaction.emoji} 태그가 찍힌 공고가 없습니다.`)}
     </section>
+  `;
+}
+
+function renderLaterCategoryButton(group, activeReactionKey) {
+  return `
+    <button class="later-category-button ${group.reaction.key === activeReactionKey ? "active" : ""}" data-later-reaction="${group.reaction.key}">
+      <span>${group.reaction.emoji}</span>
+      <strong>${escapeHtml(group.reaction.label)}</strong>
+      <small>${group.jobs.length}개 공고</small>
+    </button>
   `;
 }
 
@@ -1351,10 +1363,12 @@ document.addEventListener("click", async (event) => {
     render();
   }
 
-  const laterFilter = event.target.closest("[data-later-filter]");
-  if (laterFilter) {
-    const target = document.querySelector(`#later-${laterFilter.dataset.laterFilter}`);
-    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+  const laterReaction = event.target.closest("[data-later-reaction]");
+  if (laterReaction) {
+    state.activeMode = "later";
+    state.activeLaterReaction = laterReaction.dataset.laterReaction;
+    closeThreadPanel();
+    render();
     return;
   }
 

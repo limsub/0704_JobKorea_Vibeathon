@@ -502,6 +502,12 @@ button {
   border: 1px solid #ededed;
 }
 
+.bookmark.active {
+  border-color: #91c2e8;
+  color: #0b4c7b;
+  background: #eaf5ff;
+}
+
 .message-list {
   overflow-y: auto;
   padding: 0 0 18px;
@@ -727,6 +733,70 @@ button {
   background: var(--yellow);
   border-color: #d8a01f;
   font-size: 30px;
+}
+
+.later-category-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  max-width: 780px;
+  margin-top: 16px;
+}
+
+.later-category-button {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 2px 10px;
+  min-height: 72px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  background: #fff;
+  text-align: left;
+}
+
+.later-category-button:hover,
+.later-category-button.active {
+  border-color: #91c2e8;
+  background: #f4f9ff;
+}
+
+.later-category-button.active {
+  box-shadow: inset 3px 0 var(--blue);
+}
+
+.later-category-button > span {
+  display: grid;
+  grid-row: 1 / 3;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid #e4e4e4;
+  border-radius: 8px;
+  background: var(--surface-soft);
+  font-size: 22px;
+}
+
+.later-category-button strong,
+.later-category-button small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.later-category-button strong {
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.later-category-button small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .later-group {
@@ -1893,6 +1963,10 @@ button {
   }
 
   .trace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .later-category-grid {
     grid-template-columns: 1fr;
   }
 
