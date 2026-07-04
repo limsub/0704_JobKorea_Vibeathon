@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JobKorea Vibe 구현 대시보드</title>
+    <link rel="stylesheet" href="/public/dashboard.css" />
+  </head>
+  <body>
+    <aside class="doc-sidebar">
+      <div class="brand">
+        <span>J</span>
+        <div>
+          <strong>JobKorea Vibe</strong>
+          <small>implementation docs</small>
+        </div>
+      </div>
+      <nav>
+        <a href="#overview">Overview</a>
+        <a href="#features">Features</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#apis">APIs</a>
+        <a href="#data">Data</a>
+        <a href="#risks">Risks</a>
+      </nav>
+      <a class="back-link" href="/">Slack UI 열기</a>
+    </aside>
+
+    <main class="doc-main">
+      <section id="overview" class="hero">
+        <div>
+          <p class="eyebrow">Local Prototype Dashboard</p>
+          <h1>Slack UI 기반 JobKorea 채용공고 워크스페이스</h1>
+          <p>
+            JobKorea 공고를 채널별로 수집하고, Slack 메시지/스레드/DM 흐름 안에서
+            분류, 기록, 검색, 매칭까지 확인할 수 있도록 만든 로컬 웹앱 구현 문서입니다.
+          </p>
+        </div>
+        <div class="hero-panel">
+          <span class="status-dot"></span>
+          <strong id="servedAt">Loading...</strong>
+          <small>server status</small>
+        </div>
+      </section>
+
+      <section class="metric-grid" id="metrics">
+        <article><span id="featureCount">-</span><p>구현 기능</p></article>
+        <article><span id="apiCount">-</span><p>API 엔드포인트</p></article>
+        <article><span id="notesCount">-</span><p>저장된 노트</p></article>
+        <article><span id="classifiedJobs">-</span><p>분류된 공고</p></article>
+      </section>
+
+      <section id="features" class="doc-section">
+        <div class="section-head">
+          <p class="eyebrow">Feature Map</p>
+          <h2>구현 기능 현황</h2>
+        </div>
+        <div class="feature-list" id="featureList"></div>
+      </section>
+
+      <section id="architecture" class="doc-section">
+        <div class="section-head">
+          <p class="eyebrow">Architecture</p>
+          <h2>동작 구조</h2>
+        </div>
+        <div class="architecture">
+          <article>
+            <h3>Frontend</h3>
+            <p>Slack 스타일 단일 페이지 앱. 채널, DM, 스레드, composer, 검색 모달을 직접 렌더링합니다.</p>
+            <code>public/index.html · public/styles.css · public/app.js</code>
+          </article>
+          <article>
+            <h3>Local Backend</h3>
+            <p>Python 표준 라이브러리 서버. JobKorea 수집, URL 파싱, 상태 저장, 매칭 API를 제공합니다.</p>
+            <code>server.py</code>
+          </article>
+          <article>
+            <h3>Storage</h3>
+            <p>분류, 메모, 프로필, 직접 파싱한 공고를 로컬 JSON 파일로 저장합니다.</p>
+            <code id="dataPath">data/state.json</code>
+          </article>
+          <article>
+            <h3>ngrok Share</h3>
+            <p>같은 Wi-Fi 접속이 아니라 ngrok public URL을 통해 팀원이 웹앱에 접근합니다.</p>
+            <code id="externalShare">ngrok http 5174</code>
+          </article>
+          <article>
+            <h3>Local Parser</h3>
+            <p>GPT API Key와 로컬 Codex 호출 없이 키워드 파서와 JobKorea 크롤링으로 동작합니다.</p>
+            <code id="aiProvider">local keyword parsing</code>
+          </article>
+        </div>
+      </section>
+
+      <section id="apis" class="doc-section">
+        <div class="section-head">
+          <p class="eyebrow">API Surface</p>
+          <h2>서버 엔드포인트</h2>
+        </div>
+        <div class="api-table" id="apiTable"></div>
+      </section>
+
+      <section id="data" class="doc-section">
+        <div class="section-head">
+          <p class="eyebrow">Data Flow</p>
+          <h2>데이터 저장/활용</h2>
+        </div>
+        <div class="flow">
+          <div>JobKorea Search</div>
+          <span>→</span>
+          <div>server.py parser</div>
+          <span>→</span>
+          <div>Slack channels</div>
+          <span>→</span>
+          <div>DM notes / profile</div>
+          <span>→</span>
+          <div>Local matching thread</div>
+        </div>
+        <pre id="statePreview">{}</pre>
+      </section>
+
+      <section id="risks" class="doc-section">
+        <div class="section-head">
+          <p class="eyebrow">Technical Review</p>
+          <h2>검토 필요 사항</h2>
+        </div>
+        <div class="risk-list" id="riskList"></div>
+      </section>
+    </main>
+
+    <script src="/public/dashboard.js"></script>
+  </body>
+</html>
